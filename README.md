@@ -110,4 +110,3 @@ sudo systemctl restart vetbot
 tail -n 80 /opt/vet-bot/bot.log
 ```
 
-
