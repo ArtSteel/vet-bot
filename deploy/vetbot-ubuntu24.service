@@ -1,0 +1,19 @@
+[Unit]
+Description=VetBot Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vet-bot
+ExecStart=/opt/vet-bot/.venv/bin/python bot.py
+Restart=always
+RestartSec=5
+User=root
+Environment=PYTHONUNBUFFERED=1
+StandardOutput=append:/opt/vet-bot/bot.log
+StandardError=append:/opt/vet-bot/bot.log
+
+[Install]
+WantedBy=multi-user.target
+
+

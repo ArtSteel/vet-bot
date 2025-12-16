@@ -1,0 +1,18 @@
+[Unit]
+Description=Vet-bot (aiogram)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/vet-bot
+EnvironmentFile=/opt/vet-bot/.env
+ExecStart=/opt/vet-bot/.venv/bin/python /opt/vet-bot/bot.py
+Restart=always
+RestartSec=3
+User=vetbot
+
+[Install]
+WantedBy=multi-user.target
+
+
