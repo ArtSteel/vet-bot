@@ -99,4 +99,15 @@ sudo systemctl status vetbot
 tail -f /opt/vet-bot/bot.log
 ```
 
+### Обновление на VPS (git pull + restart)
+
+```bash
+cd /opt/vet-bot
+git pull
+source .venv/bin/activate
+pip install -r requirements.txt
+sudo systemctl restart vetbot
+tail -n 80 /opt/vet-bot/bot.log
+```
+
 
