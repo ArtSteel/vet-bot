@@ -142,7 +142,32 @@ def _limits_by_tier() -> dict:
     return limits
 
 
+async def get_model_for_user(user_id: int, has_image: bool) -> ModelConfig:
+    """
+    Определяет модель для пользователя:
+    - Free: deepseek/deepseek-v3.2-alt
+    - Paid (Подписка ИЛИ была разовая покупка за последние 24ч): qwen/qwen3-max
+    - Vision везде: vis-openai/gpt-4o-mini
+    """
+    if has_image:
+        # Vision везде используем vis-openai/gpt-4o-mini
+        return ModelConfig(model="vis-openai/gpt-4o-mini", temperature=0.2, max_tokens=MAX_TOKENS_PRO_VISION)
+    
+    # Проверяем, является ли пользователь платным
+    has_sub = await st.has_active_subscription(user_id)
+    had_recent_purchase = await st.had_recent_one_time_purchase(user_id, hours=24)
+    is_paid = has_sub or had_recent_purchase
+    
+    if is_paid:
+        # Paid: qwen/qwen3-max
+        return ModelConfig(model="qwen/qwen3-max", temperature=0.3, max_tokens=MAX_TOKENS_PRO)
+    else:
+        # Free: deepseek/deepseek-v3.2-alt
+        return ModelConfig(model="deepseek/deepseek-v3.2-alt", temperature=0.3, max_tokens=MAX_TOKENS_FREE)
+
+
 def _model_cfg_for(tier: str, has_image: bool) -> ModelConfig:
+    """Старая функция для обратной совместимости (используется в некоторых местах)"""
     tier = (tier or "free").lower()
     if has_image:
         if tier == "pro":
@@ -258,7 +283,9 @@ async def unified_ai_entry(message: Message, prompt: str, image_bytes: Optional[
             )
 
     await message.bot.send_chat_action(message.chat.id, "typing")
-    cfg = _model_cfg_for(tier, bool(image_bytes))
+    
+    # Используем новую функцию выбора модели
+    cfg = await get_model_for_user(user_id, bool(image_bytes))
     
     # Выбираем промпт: для анализов используем "Светофор", иначе обычный
     system_prompt = ANALYSIS_PROMPT if is_analysis_document else DEFAULT_PROMPT

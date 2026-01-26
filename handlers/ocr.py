@@ -90,19 +90,49 @@ async def _prepare_file(message: Message, file_id: str, is_pdf: bool = False) ->
 
 @router.message(F.photo)
 async def on_photo(message: Message):
-    # 1. ПРОВЕРКА ДОСТУПА + ЛИМИТА (Tier + monthly photo limit)
+    # 1. НОВАЯ ЛОГИКА ПРОВЕРКИ ДОСТУПА (Trial -> Подписка -> Balance)
     user_id = message.from_user.id
     if user_id not in ADMIN_IDS:
-        photo_limits = {"free": FREE_PHOTOS_PER_MONTH, "plus": PLUS_PHOTOS_PER_MONTH, "pro": PRO_PHOTOS_PER_MONTH}
-        chk = await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=False)
-        if not chk["allowed"]:
-            await message.answer(
-                "⛔ Лимит фото/документов на этот месяц исчерпан.\n\n"
-                "Чтобы продолжить разбор снимков и анализов, подключите тариф PLUS/PRO: /buy"
-            )
-            return
-        # списываем только если реально будем обрабатывать
-        await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=True)
+        # Проверка 1: Trial (первый раз бесплатно)
+        is_trial = not await st.is_trial_used(user_id)
+        if is_trial:
+            await st.mark_trial_used(user_id)
+            # Пропускаем дальше без проверок
+        else:
+            # Проверка 2: Активная подписка
+            has_sub = await st.has_active_subscription(user_id)
+            if has_sub:
+                # Проверяем месячные лимиты подписки
+                photo_limits = {"free": FREE_PHOTOS_PER_MONTH, "plus": PLUS_PHOTOS_PER_MONTH, "pro": PRO_PHOTOS_PER_MONTH}
+                chk = await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=False)
+                if not chk["allowed"]:
+                    await message.answer(
+                        "⛔ Лимит фото/документов на этот месяц исчерпан.\n\n"
+                        "Чтобы продолжить разбор снимков и анализов, подключите тариф PLUS/PRO: /buy"
+                    )
+                    return
+                # Списываем месячный лимит
+                await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=True)
+            else:
+                # Проверка 3: Balance (разовые покупки)
+                balance = await st.get_user_balance_analyses(user_id)
+                if balance > 0:
+                    # Списываем 1 единицу баланса
+                    await st.decrement_balance_analyses(user_id)
+                else:
+                    # Нет баланса - предлагаем купить
+                    from aiogram.utils.keyboard import InlineKeyboardBuilder
+                    kb = InlineKeyboardBuilder()
+                    kb.button(text="📄 Купить 1 разбор (99₽)", callback_data="pay:create:one_time_analysis")
+                    kb.button(text="💙 Подписка PLUS (299₽/мес)", callback_data="pay:create:plus")
+                    kb.button(text="💜 Подписка PRO (590₽/мес)", callback_data="pay:create:pro")
+                    kb.adjust(1)
+                    await message.answer(
+                        "⛔ У вас нет доступных расшифровок.\n\n"
+                        "Выберите вариант оплаты:",
+                        reply_markup=kb.as_markup()
+                    )
+                    return
 
     # 2. Основная логика
     if not _ANSWER_CALLBACK: return
@@ -148,18 +178,49 @@ async def on_document(message: Message):
         await message.reply("Я понимаю только картинки (JPG/PNG) и PDF документы.")
         return
 
-    # 2. ПРОВЕРКА ДОСТУПА + ЛИМИТА (Tier + monthly photo limit)
+    # 2. НОВАЯ ЛОГИКА ПРОВЕРКИ ДОСТУПА (Trial -> Подписка -> Balance)
     user_id = message.from_user.id
     if user_id not in ADMIN_IDS:
-        photo_limits = {"free": FREE_PHOTOS_PER_MONTH, "plus": PLUS_PHOTOS_PER_MONTH, "pro": PRO_PHOTOS_PER_MONTH}
-        chk = await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=False)
-        if not chk["allowed"]:
-            await message.answer(
-                "⛔ Лимит фото/документов на этот месяц исчерпан.\n\n"
-                "Чтобы продолжить разбор снимков и анализов, подключите тариф PLUS/PRO: /buy"
-            )
-            return
-        await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=True)
+        # Проверка 1: Trial (первый раз бесплатно)
+        is_trial = not await st.is_trial_used(user_id)
+        if is_trial:
+            await st.mark_trial_used(user_id)
+            # Пропускаем дальше без проверок
+        else:
+            # Проверка 2: Активная подписка
+            has_sub = await st.has_active_subscription(user_id)
+            if has_sub:
+                # Проверяем месячные лимиты подписки
+                photo_limits = {"free": FREE_PHOTOS_PER_MONTH, "plus": PLUS_PHOTOS_PER_MONTH, "pro": PRO_PHOTOS_PER_MONTH}
+                chk = await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=False)
+                if not chk["allowed"]:
+                    await message.answer(
+                        "⛔ Лимит фото/документов на этот месяц исчерпан.\n\n"
+                        "Чтобы продолжить разбор снимков и анализов, подключите тариф PLUS/PRO: /buy"
+                    )
+                    return
+                # Списываем месячный лимит
+                await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=True)
+            else:
+                # Проверка 3: Balance (разовые покупки)
+                balance = await st.get_user_balance_analyses(user_id)
+                if balance > 0:
+                    # Списываем 1 единицу баланса
+                    await st.decrement_balance_analyses(user_id)
+                else:
+                    # Нет баланса - предлагаем купить
+                    from aiogram.utils.keyboard import InlineKeyboardBuilder
+                    kb = InlineKeyboardBuilder()
+                    kb.button(text="📄 Купить 1 разбор (99₽)", callback_data="pay:create:one_time_analysis")
+                    kb.button(text="💙 Подписка PLUS (299₽/мес)", callback_data="pay:create:plus")
+                    kb.button(text="💜 Подписка PRO (590₽/мес)", callback_data="pay:create:pro")
+                    kb.adjust(1)
+                    await message.answer(
+                        "⛔ У вас нет доступных расшифровок.\n\n"
+                        "Выберите вариант оплаты:",
+                        reply_markup=kb.as_markup()
+                    )
+                    return
 
     # 3. Основная логика
     if not _ANSWER_CALLBACK: return

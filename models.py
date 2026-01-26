@@ -30,6 +30,9 @@ class User(Base):
     last_photo_month: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # YYYY-MM
     sub_end_date: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # ISO datetime или YYYY-MM-DD
     joined_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # ISO datetime
+    balance_analyses: Mapped[int] = mapped_column(Integer, default=0)  # Количество доступных разовых расшифровок
+    is_trial_used: Mapped[bool] = mapped_column(Integer, default=0)  # 0 = не использован, 1 = использован (SQLite boolean)
+    last_one_time_purchase: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # ISO datetime последней разовой покупки
 
     def to_dict(self) -> dict:
         """Преобразует объект в словарь (для обратной совместимости)"""
@@ -45,6 +48,9 @@ class User(Base):
             "last_photo_month": self.last_photo_month,
             "sub_end_date": self.sub_end_date,
             "joined_at": self.joined_at,
+            "balance_analyses": self.balance_analyses,
+            "is_trial_used": bool(self.is_trial_used),
+            "last_one_time_purchase": self.last_one_time_purchase,
         }
 
 

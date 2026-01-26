@@ -391,6 +391,84 @@ async def get_effective_tier(user_id: int) -> str:
     return (u.get("tier") or "plus").strip().lower() or "plus"
 
 
+async def get_user_balance_analyses(user_id: int) -> int:
+    """Возвращает баланс разовых расшифровок пользователя"""
+    async with _get_session() as session:
+        result = await session.execute(select(User.balance_analyses).where(User.user_id == user_id))
+        balance = result.scalar_one_or_none()
+        return balance if balance is not None else 0
+
+
+async def increment_balance_analyses(user_id: int, amount: int = 1):
+    """Увеличивает баланс разовых расшифровок и обновляет дату последней покупки"""
+    async with _get_session() as session:
+        result = await session.execute(select(User).where(User.user_id == user_id))
+        user = result.scalar_one_or_none()
+        if user:
+            user.balance_analyses = (user.balance_analyses or 0) + amount
+            user.last_one_time_purchase = datetime.now().isoformat()
+            await session.commit()
+
+
+async def decrement_balance_analyses(user_id: int) -> bool:
+    """Уменьшает баланс на 1. Возвращает True если баланс был > 0, иначе False"""
+    async with _get_session() as session:
+        result = await session.execute(select(User).where(User.user_id == user_id))
+        user = result.scalar_one_or_none()
+        if user:
+            if (user.balance_analyses or 0) > 0:
+                user.balance_analyses = user.balance_analyses - 1
+                await session.commit()
+                return True
+        return False
+
+
+async def is_trial_used(user_id: int) -> bool:
+    """Проверяет, использован ли trial для первого анализа"""
+    async with _get_session() as session:
+        result = await session.execute(select(User.is_trial_used).where(User.user_id == user_id))
+        is_used = result.scalar_one_or_none()
+        return bool(is_used) if is_used is not None else False
+
+
+async def mark_trial_used(user_id: int):
+    """Помечает trial как использованный"""
+    async with _get_session() as session:
+        result = await session.execute(select(User).where(User.user_id == user_id))
+        user = result.scalar_one_or_none()
+        if user:
+            user.is_trial_used = 1
+            await session.commit()
+
+
+async def has_active_subscription(user_id: int) -> bool:
+    """Проверяет, есть ли активная подписка"""
+    async with _get_session() as session:
+        result = await session.execute(select(User).where(User.user_id == user_id))
+        user = result.scalar_one_or_none()
+        if not user or user.status != "paid":
+            return False
+        sub_end = _parse_sub_end(user.sub_end_date)
+        if not sub_end:
+            return False
+        return sub_end > datetime.now()
+
+
+async def had_recent_one_time_purchase(user_id: int, hours: int = 24) -> bool:
+    """Проверяет, была ли разовая покупка за последние N часов"""
+    async with _get_session() as session:
+        result = await session.execute(select(User.last_one_time_purchase).where(User.user_id == user_id))
+        last_purchase_str = result.scalar_one_or_none()
+        if not last_purchase_str:
+            return False
+        try:
+            last_purchase = datetime.fromisoformat(last_purchase_str)
+            time_diff = datetime.now() - last_purchase
+            return time_diff.total_seconds() < (hours * 3600)
+        except Exception:
+            return False
+
+
 async def check_photo_limits(
     user_id: int, username: str, photo_limits_by_tier: dict, consume: bool = True
 ) -> dict:

@@ -30,14 +30,14 @@ else:
     logger.warning("💳 YOOKASSA: нет SHOP_ID/SECRET_KEY, оплата не будет работать.")
 
 TEXT_OFFER = (
-    "💎 **Подписка Vet‑bot**\n\n"
-    "🟩 **FREE (0 ₽)**\n"
-    "• 5 вопросов в день\n"
-    "• 1 фото/документ в месяц\n\n"
-    "🟦 **PLUS (299 ₽ / мес)**\n"
+    "💎 **Монетизация Vet‑bot**\n\n"
+    "📄 **Разовый разбор (99 ₽)**\n"
+    "• 1 расшифровка анализов/фото\n"
+    "• Не сгорает, используйте когда нужно\n\n"
+    "💙 **Подписка PLUS (299 ₽ / мес)**\n"
     "• больше вопросов в день\n"
     "• до 10 фото/документов в месяц\n\n"
-    "🟣 **PRO (490 ₽ / мес)**\n"
+    "💜 **Подписка PRO (590 ₽ / мес)**\n"
     "• всё из PLUS\n"
     "• до 20 фото/документов в месяц\n\n"
     "Нажмите кнопку ниже — откроется безопасная страница оплаты YooKassa."
@@ -46,8 +46,9 @@ TEXT_OFFER = (
 
 def pay_kb():
     kb = InlineKeyboardBuilder()
-    kb.button(text="🟦 Оформить PLUS (299₽/мес)", callback_data="pay:create:plus")
-    kb.button(text="🟣 Оформить PRO (490₽/мес)", callback_data="pay:create:pro")
+    kb.button(text="📄 Разовый разбор (99₽)", callback_data="pay:create:one_time_analysis")
+    kb.button(text="💙 Подписка PLUS (299₽/мес)", callback_data="pay:create:plus")
+    kb.button(text="💜 Подписка PRO (590₽/мес)", callback_data="pay:create:pro")
     kb.adjust(1)
     return kb
 
@@ -69,19 +70,27 @@ async def process_real_pay(cq: CallbackQuery):
         await cq.answer("Оплата временно недоступна. Попробуйте позже.", show_alert=True)
         return
 
-    plan = cq.data.split(":")[2]  # 'plus' или 'pro'
+    plan = cq.data.split(":")[2]  # 'one_time_analysis', 'plus' или 'pro'
     user_id = cq.from_user.id
 
-    if plan == "plus":
+    if plan == "one_time_analysis":
+        amount = 99
+        tier = "one_time_analysis"
+        plan_name = "Разовый разбор 📄"
+        description = f"Разовая расшифровка анализов для пользователя Telegram {user_id}"
+        item_description = "Разовый разбор анализов/фото"
+    elif plan == "plus":
         amount = 299
         tier = "plus"
-        plan_name = "PLUS 🟦"
-    else:
-        amount = 490
+        plan_name = "PLUS 💙"
+        description = f"Подписка PLUS на 30 дней для пользователя Telegram {user_id}"
+        item_description = f"Подписка PLUS на 30 дней"
+    else:  # pro
+        amount = 590
         tier = "pro"
-        plan_name = "PRO 🟣"
-
-    description = f"Подписка {plan.upper()} на 30 дней для пользователя Telegram {user_id}"
+        plan_name = "PRO 💜"
+        description = f"Подписка PRO на 30 дней для пользователя Telegram {user_id}"
+        item_description = f"Подписка PRO на 30 дней"
 
     payment_data = {
         "amount": {"value": f"{amount}.00", "currency": "RUB"},
@@ -94,7 +103,7 @@ async def process_real_pay(cq: CallbackQuery):
             "customer": {"email": f"user{user_id}@example.com"},
             "items": [
                 {
-                    "description": f"Подписка {plan.upper()} на 30 дней"[:128],
+                    "description": item_description[:128],
                     "quantity": "1.0",
                     "amount": {"value": f"{amount}.00", "currency": "RUB"},
                     "vat_code": 1,
@@ -112,12 +121,20 @@ async def process_real_pay(cq: CallbackQuery):
 
     pay_url = payment.confirmation.confirmation_url
 
-    text = (
-        f"💳 *Оплата тарифа {plan_name}*\n\n"
-        f"Сумма: *{amount} ₽* за 30 дней.\n\n"
-        "Нажмите кнопку ниже, чтобы перейти на страницу оплаты.\n"
-        "После успешной оплаты доступ подключится автоматически в течение нескольких минут."
-    )
+    if plan == "one_time_analysis":
+        text = (
+            f"💳 *Оплата {plan_name}*\n\n"
+            f"Сумма: *{amount} ₽*\n\n"
+            "Нажмите кнопку ниже, чтобы перейти на страницу оплаты.\n"
+            "После успешной оплаты вам будет начислена 1 расшифровка анализов."
+        )
+    else:
+        text = (
+            f"💳 *Оплата тарифа {plan_name}*\n\n"
+            f"Сумма: *{amount} ₽* за 30 дней.\n\n"
+            "Нажмите кнопку ниже, чтобы перейти на страницу оплаты.\n"
+            "После успешной оплаты доступ подключится автоматически в течение нескольких минут."
+        )
 
     kb = InlineKeyboardBuilder()
     kb.button(text="Оплатить через YooKassa", url=pay_url)
@@ -155,10 +172,26 @@ async def yookassa_polling_loop(bot: Bot, poll_interval: int = 60):
                 if not is_new:
                     continue
 
+                # Обработка разовой покупки
+                if str(tier) == "one_time_analysis":
+                    await st.increment_balance_analyses(int(user_id), 1)
+                    try:
+                        text = (
+                            f"🎉 *Покупка успешна!*\n\n"
+                            f"Вам начислена *1 расшифровка* анализов.\n"
+                            f"Используйте её, отправив фото или документ с анализами.\n\n"
+                            "Спасибо за поддержку!"
+                        )
+                        await bot.send_message(int(user_id), text, parse_mode="Markdown")
+                    except Exception as e_send:
+                        logger.warning("Не удалось отправить уведомление: %r", e_send)
+                    continue
+
+                # Обработка подписки
                 end_dt = (datetime.now() + timedelta(days=30)).replace(microsecond=0)
                 await st.set_user_paid(int(user_id), end_dt.isoformat(), str(tier))
 
-                plan_name = "PRO 🟣" if str(tier) == "pro" else "PLUS 🟦"
+                plan_name = "PRO 💜" if str(tier) == "pro" else "PLUS 💙"
                 try:
                     text = (
                         f"🎉 *Подписка активирована!*\n\n"
