@@ -1,23 +1,66 @@
 """
-Async Storage для Vet-bot (SQLAlchemy 2.0 + aiosqlite)
+Async Storage для Vet-bot (SQLAlchemy 2.0)
+Поддерживает SQLite (aiosqlite) и PostgreSQL (asyncpg)
 Все методы асинхронные, не блокируют Event Loop.
 """
 
 import logging
+import os
 from datetime import datetime, date, time
 from pathlib import Path
 from typing import Optional
 
+from dotenv import load_dotenv
 from sqlalchemy import select, update, insert, func, and_, or_
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from models import Base, User, Pet, History, YooKassaPayment, Feedback
 
+# Загружаем переменные окружения
+load_dotenv()
+
 logger = logging.getLogger("VetBot.Storage")
 
-DB_PATH = Path("bot.db")
-DATABASE_URL = f"sqlite+aiosqlite:///{DB_PATH}"
+# Автоматическое определение БД
+def _get_database_url() -> str:
+    """
+    Определяет, какую БД использовать:
+    - Если указан DATABASE_URL -> используем его
+    - Если указаны параметры PostgreSQL -> формируем URL для PostgreSQL
+    - Иначе -> используем SQLite (fallback)
+    """
+    # Проверяем полный DATABASE_URL
+    database_url = os.getenv("DATABASE_URL")
+    if database_url:
+        # Если URL не содержит схему драйвера, добавляем postgresql+asyncpg
+        if database_url.startswith("postgresql://"):
+            database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif not database_url.startswith(("postgresql+asyncpg://", "sqlite+aiosqlite://")):
+            # Если указан просто postgresql://, добавляем asyncpg
+            database_url = f"postgresql+asyncpg://{database_url}"
+        logger.info("🔗 Используется DATABASE_URL из .env")
+        return database_url
+
+    # Проверяем параметры PostgreSQL
+    pg_user = os.getenv("POSTGRES_USER")
+    pg_password = os.getenv("POSTGRES_PASSWORD")
+    pg_db = os.getenv("POSTGRES_DB")
+    pg_host = os.getenv("POSTGRES_HOST", "localhost")
+    pg_port = os.getenv("POSTGRES_PORT", "5432")
+
+    if pg_user and pg_password and pg_db:
+        pg_url = f"postgresql+asyncpg://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
+        logger.info(f"🐘 Используется PostgreSQL: {pg_host}:{pg_port}/{pg_db}")
+        return pg_url
+
+    # Fallback на SQLite
+    db_path = Path("bot.db")
+    sqlite_url = f"sqlite+aiosqlite:///{db_path}"
+    logger.info(f"💾 Используется SQLite: {db_path}")
+    return sqlite_url
+
+DATABASE_URL = _get_database_url()
 
 # Глобальные объекты (инициализируются в init_db)
 _engine = None
@@ -47,7 +90,8 @@ async def init_db():
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    logger.info("📂 БД готова (Async SQLAlchemy 2.0)")
+    db_type = "PostgreSQL" if "postgresql" in DATABASE_URL else "SQLite"
+    logger.info(f"📂 БД готова ({db_type} + Async SQLAlchemy 2.0)")
 
 
 def _get_session() -> AsyncSession:
