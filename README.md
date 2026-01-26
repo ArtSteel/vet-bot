@@ -110,3 +110,34 @@ sudo systemctl restart vetbot
 tail -n 80 /opt/vet-bot/bot.log
 ```
 
+### Авто-деплой через GitHub Actions
+
+После каждого `git push` в ветку `main` бот автоматически обновится на VPS.
+
+#### Настройка (один раз):
+
+1. **Создай SSH ключ на VPS** (если ещё нет):
+```bash
+ssh-keygen -t ed25519 -C "github-actions-vet-bot" -f ~/.ssh/github_actions_vet_bot
+cat ~/.ssh/github_actions_vet_bot.pub >> ~/.ssh/authorized_keys
+```
+
+2. **Добавь Secrets в GitHub** (Settings → Secrets and variables → Actions):
+   - `VET_BOT_HOST` — IP или домен VPS (например: `83.220.170.177`)
+   - `VET_BOT_USER` — пользователь SSH (обычно `root`)
+   - `VET_BOT_SSH_KEY` — **приватный** SSH ключ (содержимое `~/.ssh/github_actions_vet_bot` на VPS)
+   - `VET_BOT_SSH_PORT` — порт SSH (опционально, по умолчанию 22)
+
+3. **Скопируй приватный ключ с VPS:**
+```bash
+cat ~/.ssh/github_actions_vet_bot
+```
+Скопируй весь вывод (включая `-----BEGIN OPENSSH PRIVATE KEY-----` и `-----END OPENSSH PRIVATE KEY-----`) и вставь в `VET_BOT_SSH_KEY` на GitHub.
+
+#### Как работает:
+
+- При `git push` в `main` → GitHub Actions подключается по SSH → делает `git pull` → обновляет зависимости → перезапускает `vetbot.service`
+- Можно запустить вручную: Actions → Deploy Vet-bot to VPS → Run workflow
+
+**Важно:** Имена secrets начинаются с `VET_BOT_`, чтобы не конфликтовать с другими ботами (VPN-bot, Med-bot и т.д.).
+

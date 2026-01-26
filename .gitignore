@@ -24,4 +24,7 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Temp / upload
+.tmp.driveupload/
+
 

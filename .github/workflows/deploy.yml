@@ -1,0 +1,53 @@
+name: Deploy Vet-bot to VPS
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:  # Ручной запуск из GitHub UI
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VET_BOT_HOST }}
+          username: ${{ secrets.VET_BOT_USER }}
+          key: ${{ secrets.VET_BOT_SSH_KEY }}
+          port: ${{ secrets.VET_BOT_SSH_PORT || 22 }}
+          script: |
+            set -e  # Остановка при ошибке
+            
+            echo "🚀 Начинаю деплой vet-bot..."
+            
+            cd /opt/vet-bot || { echo "❌ Папка /opt/vet-bot не найдена!"; exit 1; }
+            
+            echo "📥 Обновляю код из GitHub..."
+            git pull origin main || { echo "❌ Ошибка git pull"; exit 1; }
+            
+            echo "📦 Обновляю зависимости..."
+            source .venv/bin/activate
+            pip install -r requirements.txt --quiet --upgrade || { echo "❌ Ошибка установки зависимостей"; exit 1; }
+            
+            echo "🔄 Перезапускаю сервис vetbot..."
+            sudo systemctl restart vetbot || { echo "❌ Ошибка перезапуска сервиса"; exit 1; }
+            
+            sleep 3
+            
+            echo "✅ Проверяю статус сервиса..."
+            if sudo systemctl is-active --quiet vetbot; then
+              echo "✅ Сервис vetbot успешно запущен!"
+              sudo systemctl status vetbot --no-pager -n 30
+            else
+              echo "❌ Сервис vetbot не запустился!"
+              sudo systemctl status vetbot --no-pager -n 100
+              exit 1
+            fi
+            
+            echo "🎉 Деплой завершён успешно!"
