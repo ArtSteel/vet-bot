@@ -1,5 +1,6 @@
-# handlers/ocr.py — VET VERSION: Анализ фото (Только для PRO)
+# handlers/ocr.py — VET VERSION: Анализ фото (Асинхронная обработка)
 
+import asyncio
 import io
 import logging
 from typing import Callable, Awaitable, Optional
@@ -18,14 +19,50 @@ PLUS_PHOTOS_PER_MONTH = int(os.getenv("PLUS_PHOTOS_PER_MONTH", "10"))
 PRO_PHOTOS_PER_MONTH_RAW = os.getenv("PRO_PHOTOS_PER_MONTH", "20")
 PRO_PHOTOS_PER_MONTH = None if not PRO_PHOTOS_PER_MONTH_RAW.strip() else int(PRO_PHOTOS_PER_MONTH_RAW)
 
-AnswerCallback = Callable[[Message, str, Optional[bytes]], Awaitable[None]]
+AnswerCallback = Callable[[Message, str, Optional[bytes], bool], Awaitable[None]]
 _ANSWER_CALLBACK: Optional[AnswerCallback] = None
 
 def register_answer_callback(func: AnswerCallback):
     global _ANSWER_CALLBACK
     _ANSWER_CALLBACK = func
 
+def _process_pdf_sync(buf: io.BytesIO) -> Optional[Image.Image]:
+    """Синхронная обработка PDF (выполняется в отдельном потоке)"""
+    try:
+        doc = fitz.open(stream=buf, filetype="pdf")
+        if doc.page_count < 1:
+            doc.close()
+            return None
+        page = doc.load_page(0)
+        pix = page.get_pixmap(dpi=200)
+        img_data = pix.tobytes("jpg")
+        doc.close()
+        return Image.open(io.BytesIO(img_data))
+    except Exception as e:
+        logging.error(f"Error processing PDF: {e}")
+        return None
+
+
+def _process_image_sync(img: Image.Image) -> Optional[bytes]:
+    """Синхронная обработка изображения (выполняется в отдельном потоке)"""
+    try:
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        max_dim = 2048
+        if max(img.size) > max_dim:
+            img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+        
+        out_buf = io.BytesIO()
+        img.save(out_buf, format='JPEG', quality=85, optimize=True)
+        return out_buf.getvalue()
+    except Exception as e:
+        logging.error(f"Error processing image: {e}")
+        return None
+
+
 async def _prepare_file(message: Message, file_id: str, is_pdf: bool = False) -> Optional[bytes]:
+    """Асинхронная подготовка файла с неблокирующей обработкой"""
     try:
         file_info = await message.bot.get_file(file_id)
         buf = io.BytesIO()
@@ -33,23 +70,17 @@ async def _prepare_file(message: Message, file_id: str, is_pdf: bool = False) ->
         buf.seek(0)
 
         if is_pdf:
-            doc = fitz.open(stream=buf, filetype="pdf")
-            if doc.page_count < 1: return None
-            page = doc.load_page(0)
-            pix = page.get_pixmap(dpi=200)
-            img_data = pix.tobytes("jpg")
-            img = Image.open(io.BytesIO(img_data))
+            # PDF обработка в отдельном потоке
+            img = await asyncio.to_thread(_process_pdf_sync, buf)
+            if not img:
+                return None
         else:
-            img = Image.open(buf)
+            # Открытие изображения в отдельном потоке
+            img = await asyncio.to_thread(Image.open, buf)
         
-        if img.mode != 'RGB': img = img.convert('RGB')
-
-        max_dim = 2048
-        if max(img.size) > max_dim: img.thumbnail((max_dim, max_dim))
-
-        out_buf = io.BytesIO()
-        img.save(out_buf, format='JPEG', quality=85)
-        return out_buf.getvalue()
+        # Обработка изображения в отдельном потоке
+        result = await asyncio.to_thread(_process_image_sync, img)
+        return result
 
     except Exception as e:
         logging.error(f"Error processing file: {e}")
@@ -76,10 +107,16 @@ async def on_photo(message: Message):
     # 2. Основная логика
     if not _ANSWER_CALLBACK: return
     
+    # Индикация загрузки
     await message.bot.send_chat_action(message.chat.id, "upload_photo")
+    status_msg = await message.reply("🔎 Загружаю и обрабатываю изображение...")
+    
     img_bytes = await _prepare_file(message, message.photo[-1].file_id, is_pdf=False)
     
     if img_bytes:
+        # Обновляем статус
+        await status_msg.edit_text("🔎 Анализирую снимок...")
+        
         # ВЕТЕРИНАРНЫЙ ПРОМПТ ДЛЯ ФОТО
         caption = message.caption or (
             "Это изображение от владельца животного (симптом или документ). "
@@ -88,8 +125,17 @@ async def on_photo(message: Message):
             "3. НЕ ставь диагноз, но подскажи, нужен ли очный врач срочно."
         )
         
-        await message.reply("🔎 Изучаю снимок...")
-        await _ANSWER_CALLBACK(message, caption, img_bytes)
+        # Определяем, это анализ или фото симптома (по caption или по умолчанию - фото симптома)
+        is_analysis = "анализ" in (message.caption or "").lower() or "анализы" in (message.caption or "").lower()
+        
+        try:
+            await _ANSWER_CALLBACK(message, caption, img_bytes, is_analysis_document=is_analysis)
+        finally:
+            # Удаляем статус-сообщение после обработки
+            try:
+                await status_msg.delete()
+            except:
+                pass
 
 @router.message(F.document)
 async def on_document(message: Message):
@@ -118,18 +164,32 @@ async def on_document(message: Message):
     # 3. Основная логика
     if not _ANSWER_CALLBACK: return
 
-    await message.bot.send_chat_action(message.chat.id, "upload_photo")
+    # Индикация загрузки
+    await message.bot.send_chat_action(message.chat.id, "upload_document")
+    status_msg = await message.reply("📄 Загружаю и обрабатываю документ...")
+    
     img_bytes = await _prepare_file(message, message.document.file_id, is_pdf=is_pdf)
     
     if img_bytes:
+        # Обновляем статус
+        await status_msg.edit_text("🔎 Анализирую документ...")
+        
         caption = message.caption or (
-            "Это ветеринарный документ (анализы или выписка). "
-            "1. Кратко объясни простыми словами, что здесь написано. "
-            "2. Выдели критические отклонения. "
-            "3. Подскажи хозяину, о чем спросить врача на приеме."
+            "Интерпретируй результаты анализов из этого ветеринарного документа. "
+            "Используй систему 'Светофор' для оценки показателей: 🔴 критично, 🟡 погранично, 🟢 норма. "
+            "Начни с краткого резюме, затем детальный разбор с эмодзи, и рекомендации."
         )
         
-        await message.reply("🔎 Читаю документ...")
-        await _ANSWER_CALLBACK(message, caption, img_bytes)
+        # Документы (PDF/изображения документов) всегда считаются анализами
+        is_analysis = True
+        
+        try:
+            await _ANSWER_CALLBACK(message, caption, img_bytes, is_analysis_document=is_analysis)
+        finally:
+            # Удаляем статус-сообщение после обработки
+            try:
+                await status_msg.delete()
+            except:
+                pass
     else:
-        await message.reply("Не удалось прочитать файл. Попробуйте прислать фото или скриншот.")
+        await status_msg.edit_text("❌ Не удалось прочитать файл. Попробуйте прислать фото или скриншот.")
