@@ -47,7 +47,7 @@ HELP_TEXT = (
 @router.message(CommandStart())
 async def cmd_start(message: Message):
     user = message.from_user
-    st.register_user_if_new(user.id, user.username or "Unknown")
+    await st.register_user_if_new(user.id, user.username or "Unknown")
     await message.answer(WELCOME_TEXT, reply_markup=main_reply_kb(), parse_mode="Markdown")
 
 
@@ -59,8 +59,8 @@ async def cmd_me(message: Message):
         return
 
     limits_by_tier = {"free": FREE_DAILY_LIMIT, "plus": PLUS_DAILY_LIMIT, "pro": PRO_DAILY_LIMIT}
-    info = st.check_user_limits(user_id, message.from_user.username or "Unknown", limits_by_tier, consume=False)
-    sub = st.get_user_subscription(user_id) or {}
+    info = await st.check_user_limits(user_id, message.from_user.username or "Unknown", limits_by_tier, consume=False)
+    sub = (await st.get_user_subscription(user_id)) or {}
 
     tier = info.get("tier", "free")
     limit = info.get("limit")
@@ -74,7 +74,7 @@ async def cmd_me(message: Message):
         text += f"Лимит в день: **{limit}** | Осталось сегодня: **{remaining}**\n"
 
     photo_limits = {"free": FREE_PHOTOS_PER_MONTH, "plus": PLUS_PHOTOS_PER_MONTH, "pro": PRO_PHOTOS_PER_MONTH}
-    pinfo = st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=False)
+    pinfo = await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=False)
     if pinfo.get("limit") is None:
         text += "Фото/документы в месяц: **безлимит**\n"
     else:
@@ -87,7 +87,7 @@ async def cmd_me(message: Message):
 
 @router.message(Command("history"))
 async def cmd_history(message: Message):
-    items = st.get_last_entries(message.from_user.id, limit=5)
+    items = await st.get_last_entries(message.from_user.id, limit=5)
     if not items:
         await message.answer("Пока нет истории. Напишите вопрос 👇", reply_markup=main_reply_kb())
         return
@@ -172,7 +172,7 @@ async def btn_question_hint(message: Message):
 @router.message(Command("stats"))
 async def cmd_stats(message: Message):
     if message.from_user.id not in ADMIN_IDS: return
-    s = st.get_bot_stats()
+    s = await st.get_bot_stats()
 
     text = (
         "📊 **Статистика Vet‑bot**\n\n"
@@ -203,7 +203,7 @@ async def cmd_stats(message: Message):
 async def cmd_broadcast(message: Message, command: CommandObject):
     if message.from_user.id not in ADMIN_IDS: return
     if not command.args: return
-    users = st.get_all_users()
+    users = await st.get_all_users()
     for uid in users:
         try: await message.bot.send_message(uid, command.args, parse_mode="Markdown")
         except: pass

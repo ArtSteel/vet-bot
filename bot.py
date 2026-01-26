@@ -164,9 +164,9 @@ async def send_long_message(message: Message, text: str) -> Message | None:
             last_msg = await message.answer(chunk, parse_mode=None)
     return last_msg
 
-def build_context(user_id: int) -> List[dict]:
+async def build_context(user_id: int) -> List[dict]:
     context = []
-    pet = st.get_active_pet(user_id)
+    pet = await st.get_active_pet(user_id)
     
     if pet:
         info = (
@@ -180,7 +180,8 @@ def build_context(user_id: int) -> List[dict]:
         )
         context.append({"role": "system", "content": f"[SYSTEM DATA] {info}"})
     
-    for _, u, b in reversed(st.get_last_entries(user_id, 3)):
+    entries = await st.get_last_entries(user_id, 3)
+    for _, u, b in reversed(entries):
         context.extend([{"role": "user", "content": u}, {"role": "assistant", "content": b}])
     
     return context
@@ -189,7 +190,7 @@ def build_context(user_id: int) -> List[dict]:
 
 async def unified_ai_entry(message: Message, prompt: str, image_bytes: Optional[bytes] = None):
     user_id = message.from_user.id
-    pet = st.get_active_pet(user_id)
+    pet = await st.get_active_pet(user_id)
     if not pet:
         from handlers.medcard import show_medcard_menu
         await message.answer("⚠️ **Я не знаю, кого мы лечим.**\nПожалуйста, создайте профиль питомца.")
@@ -198,7 +199,7 @@ async def unified_ai_entry(message: Message, prompt: str, image_bytes: Optional[
 
     tier = "pro" if user_id in ADMIN_IDS else None
     if user_id not in ADMIN_IDS:
-        limit = st.check_user_limits(
+        limit = await st.check_user_limits(
             user_id,
             message.from_user.username or "Unknown",
             _limits_by_tier(),
@@ -219,7 +220,7 @@ async def unified_ai_entry(message: Message, prompt: str, image_bytes: Optional[
             return
         # Теперь списываем (после всех валидаций) — только для ТЕКСТА
         if not image_bytes:
-            st.check_user_limits(
+            await st.check_user_limits(
                 user_id,
                 message.from_user.username or "Unknown",
                 _limits_by_tier(),
@@ -228,7 +229,7 @@ async def unified_ai_entry(message: Message, prompt: str, image_bytes: Optional[
 
     await message.bot.send_chat_action(message.chat.id, "typing")
     cfg = _model_cfg_for(tier, bool(image_bytes))
-    reply = await client.chat(DEFAULT_PROMPT, prompt, build_context(user_id), cfg, image_bytes=image_bytes)
+    reply = await client.chat(DEFAULT_PROMPT, prompt, await build_context(user_id), cfg, image_bytes=image_bytes)
     
     # === ОЧИСТКА ОТ ДУБЛЕЙ И ЗАГОЛОВКОВ ===
     # Убираем заголовки, если модель их сгенерировала
@@ -249,7 +250,7 @@ async def unified_ai_entry(message: Message, prompt: str, image_bytes: Optional[
     reply = reply.replace("### ", "").replace("**", "*").strip()
     reply += LEGAL_DISCLAIMER
     
-    entry_id = st.save_entry(user_id, prompt if not image_bytes else "[📸]", reply)
+    entry_id = await st.save_entry(user_id, prompt if not image_bytes else "[📸]", reply)
 
     last_msg = await send_long_message(message, reply)
     if last_msg:
@@ -266,7 +267,7 @@ async def free_text(message: Message):
 async def reminder_loop(bot: Bot):
     while True:
         try:
-            notifications = st.check_reminders_today()
+            notifications = await st.check_reminders_today()
             for uid, text in notifications:
                 try: await bot.send_message(uid, text)
                 except: pass
@@ -278,7 +279,7 @@ async def reminder_loop(bot: Bot):
 async def main():
     global client
     load_dotenv()
-    st.init_db()
+    await st.init_db()  # Async инициализация БД
 
     client = VseGPTClient(VSEGPT_API_KEY, VSEGPT_BASE_URL)
     bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"), default=DefaultBotProperties(parse_mode="Markdown"))
@@ -298,7 +299,7 @@ async def main():
     asyncio.create_task(reminder_loop(bot))
     asyncio.create_task(yookassa_polling_loop(bot))
     
-    print("✅ VET-BOT ЗАПУЩЕН! (v6.2 Stable + No Spam)")
+    print("✅ VET-BOT ЗАПУЩЕН! (v6.2 Stable + Async Storage)")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

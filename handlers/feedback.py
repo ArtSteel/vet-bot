@@ -20,7 +20,7 @@ async def cb_feedback(cq: CallbackQuery):
     except Exception:
         entry_id = None
 
-    st.save_feedback(cq.from_user.id, kind=kind, source=source, entry_id=entry_id)
+    await st.save_feedback(cq.from_user.id, kind=kind, source=source, entry_id=entry_id)
 
     # Убираем клавиатуру, чтобы не кликали бесконечно
     try:

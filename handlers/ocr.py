@@ -63,7 +63,7 @@ async def on_photo(message: Message):
     user_id = message.from_user.id
     if user_id not in ADMIN_IDS:
         photo_limits = {"free": FREE_PHOTOS_PER_MONTH, "plus": PLUS_PHOTOS_PER_MONTH, "pro": PRO_PHOTOS_PER_MONTH}
-        chk = st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=False)
+        chk = await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=False)
         if not chk["allowed"]:
             await message.answer(
                 "⛔ Лимит фото/документов на этот месяц исчерпан.\n\n"
@@ -71,7 +71,7 @@ async def on_photo(message: Message):
             )
             return
         # списываем только если реально будем обрабатывать
-        st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=True)
+        await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=True)
 
     # 2. Основная логика
     if not _ANSWER_CALLBACK: return
@@ -106,14 +106,14 @@ async def on_document(message: Message):
     user_id = message.from_user.id
     if user_id not in ADMIN_IDS:
         photo_limits = {"free": FREE_PHOTOS_PER_MONTH, "plus": PLUS_PHOTOS_PER_MONTH, "pro": PRO_PHOTOS_PER_MONTH}
-        chk = st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=False)
+        chk = await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=False)
         if not chk["allowed"]:
             await message.answer(
                 "⛔ Лимит фото/документов на этот месяц исчерпан.\n\n"
                 "Чтобы продолжить разбор снимков и анализов, подключите тариф PLUS/PRO: /buy"
             )
             return
-        st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=True)
+        await st.check_photo_limits(user_id, message.from_user.username or "Unknown", photo_limits, consume=True)
 
     # 3. Основная логика
     if not _ANSWER_CALLBACK: return

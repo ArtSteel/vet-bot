@@ -151,12 +151,12 @@ async def yookassa_polling_loop(bot: Bot, poll_interval: int = 60):
                 if not user_id or not tier or not payment_id:
                     continue
 
-                is_new = st.mark_yookassa_payment_processed(str(payment_id), int(user_id), str(tier), str(created_at))
+                is_new = await st.mark_yookassa_payment_processed(str(payment_id), int(user_id), str(tier), str(created_at))
                 if not is_new:
                     continue
 
                 end_dt = (datetime.now() + timedelta(days=30)).replace(microsecond=0)
-                st.set_user_paid(int(user_id), end_dt.isoformat(), str(tier))
+                await st.set_user_paid(int(user_id), end_dt.isoformat(), str(tier))
 
                 plan_name = "PRO 🟣" if str(tier) == "pro" else "PLUS 🟦"
                 try:

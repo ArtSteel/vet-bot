@@ -24,7 +24,7 @@ async def cb_medcard(cq: CallbackQuery):
 
 async def show_medcard_menu(message: Message):
     user_id = message.chat.id
-    active_pet = st.get_active_pet(user_id)
+    active_pet = await st.get_active_pet(user_id)
     
     kb = InlineKeyboardBuilder()
     
@@ -34,7 +34,7 @@ async def show_medcard_menu(message: Message):
         kb.button(text="🔄 Сменить питомца", callback_data="pet:switch_list")
         kb.button(text="❌ Удалить", callback_data="pet:delete_confirm")
     else:
-        pets = st.get_user_pets(user_id)
+        pets = await st.get_user_pets(user_id)
         if not pets:
             text = "🐾 У вас нет активных питомцев. Давайте создадим!"
             kb.button(text="➕ Создать питомца", callback_data="pet:create_new")
@@ -67,7 +67,7 @@ def render_pet_card(pet: dict) -> str:
 
 @router.callback_query(lambda c: c.data == "pet:switch_list")
 async def pet_switch_list(cq: CallbackQuery):
-    pets = st.get_user_pets(cq.from_user.id)
+    pets = await st.get_user_pets(cq.from_user.id)
     kb = InlineKeyboardBuilder()
     for p in pets:
         name = p['name'] if p['name'] else "???"
@@ -79,7 +79,7 @@ async def pet_switch_list(cq: CallbackQuery):
 @router.callback_query(lambda c: c.data and c.data.startswith("pet:select:"))
 async def pet_select(cq: CallbackQuery):
     pet_id = int(cq.data.split(":")[2])
-    st.set_active_pet(cq.from_user.id, pet_id)
+    await st.set_active_pet(cq.from_user.id, pet_id)
     await show_medcard_menu(cq.message)
 
 @router.callback_query(lambda c: c.data == "pet:create_new")
@@ -92,7 +92,7 @@ async def pet_create_new(cq: CallbackQuery):
 @router.callback_query(lambda c: c.data and c.data.startswith("pet:init:"))
 async def pet_init(cq: CallbackQuery):
     ptype = cq.data.split(":")[2]
-    st.create_pet(cq.from_user.id, ptype)
+    await st.create_pet(cq.from_user.id, ptype)
     
     # ВАЖНО: Ставим флаг, что ждем имя
     WAITING_FIELD[cq.from_user.id] = "name"
@@ -139,9 +139,9 @@ async def process_pet_input(message: Message):
             await message.reply("⚠️ Вес должен быть числом!")
             return
 
-    st.update_pet_field(user_id, field, val)
+    await st.update_pet_field(user_id, field, val)
     
-    active = st.get_active_pet(user_id)
+    active = await st.get_active_pet(user_id)
     kb = InlineKeyboardBuilder()
     kb.button(text="Ок, в меню", callback_data="main:medcard")
     
@@ -157,5 +157,5 @@ async def delete_confirm(cq: CallbackQuery):
 
 @router.callback_query(lambda c: c.data == "pet:delete_yes")
 async def delete_yes(cq: CallbackQuery):
-    st.delete_active_pet(cq.from_user.id)
+    await st.delete_active_pet(cq.from_user.id)
     await cq.message.edit_text("Удалено.", reply_markup=InlineKeyboardBuilder().button(text="Меню", callback_data="main:medcard").as_markup())
