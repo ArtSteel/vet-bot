@@ -89,6 +89,34 @@ async def init_db():
     # Создание всех таблиц
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Миграция: добавление новых колонок для монетизации (если их нет)
+        if "postgresql" in DATABASE_URL:
+            from sqlalchemy import text
+            try:
+                # Проверяем существующие колонки
+                check_sql = """
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'users' 
+                    AND column_name IN ('balance_analyses', 'is_trial_used', 'last_one_time_purchase')
+                """
+                result = await conn.execute(text(check_sql))
+                existing_columns = {row[0] for row in result.fetchall()}
+                
+                if 'balance_analyses' not in existing_columns:
+                    await conn.execute(text("ALTER TABLE users ADD COLUMN balance_analyses INTEGER DEFAULT 0"))
+                    logger.info("✅ Миграция: добавлена колонка balance_analyses")
+                
+                if 'is_trial_used' not in existing_columns:
+                    await conn.execute(text("ALTER TABLE users ADD COLUMN is_trial_used INTEGER DEFAULT 0"))
+                    logger.info("✅ Миграция: добавлена колонка is_trial_used")
+                
+                if 'last_one_time_purchase' not in existing_columns:
+                    await conn.execute(text("ALTER TABLE users ADD COLUMN last_one_time_purchase VARCHAR"))
+                    logger.info("✅ Миграция: добавлена колонка last_one_time_purchase")
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка при миграции колонок (возможно, они уже существуют): {e}")
 
     db_type = "PostgreSQL" if "postgresql" in DATABASE_URL else "SQLite"
     logger.info(f"📂 БД готова ({db_type} + Async SQLAlchemy 2.0)")
