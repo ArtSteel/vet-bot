@@ -288,9 +288,9 @@ async def get_revenue_stats() -> dict:
     }
     
     async with _get_session() as session:
-        # Получаем все платежи
+        # Получаем все платежи как объекты модели
         result = await session.execute(select(YooKassaPayment))
-        payments = result.fetchall()
+        payments = result.scalars().all()
         
         total_revenue = 0
         today_revenue = 0
