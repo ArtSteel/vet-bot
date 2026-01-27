@@ -2,10 +2,13 @@
 
 import os
 from aiogram import Router, F
-from aiogram.types import Message
+from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.filters import Command, CommandObject
+from aiogram.fsm.context import FSMContext
 from dotenv import load_dotenv
 import storage as st
+from handlers.states import PromoState
+from keyboards.main_kb import main_reply_kb
 
 load_dotenv()
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
@@ -31,6 +34,43 @@ async def cmd_promo(message: Message, command: CommandObject):
     result = await st.activate_promo_code(user_id, code)
     
     await message.answer(result["message"], parse_mode="Markdown")
+
+
+@router.message(F.text == "🎟 Промокод")
+async def btn_promo(message: Message, state: FSMContext):
+    """Обработчик кнопки 'Промокод' - запускает FSM"""
+    cancel_kb = ReplyKeyboardMarkup(
+        resize_keyboard=True,
+        keyboard=[[KeyboardButton(text="❌ Отмена")]],
+        one_time_keyboard=True
+    )
+    
+    await message.answer(
+        "✍️ **Введите код купона или промокод:**\n\n"
+        "Например: `CORGI_LOVE`",
+        parse_mode="Markdown",
+        reply_markup=cancel_kb
+    )
+    await state.set_state(PromoState.waiting_for_code)
+
+
+@router.message(PromoState.waiting_for_code, F.text == "❌ Отмена")
+async def cancel_promo(message: Message, state: FSMContext):
+    """Отмена ввода промокода"""
+    await state.clear()
+    await message.answer("❌ Ввод промокода отменен.", reply_markup=main_reply_kb())
+
+
+@router.message(PromoState.waiting_for_code, F.text)
+async def process_promo_code(message: Message, state: FSMContext):
+    """Обработка введенного промокода"""
+    user_id = message.from_user.id
+    code = message.text.strip()
+    
+    result = await st.activate_promo_code(user_id, code)
+    
+    await state.clear()
+    await message.answer(result["message"], parse_mode="Markdown", reply_markup=main_reply_kb())
 
 
 @router.message(Command("create_promo"))

@@ -144,24 +144,6 @@ async def cmd_me(message: Message):
     await message.answer(text, parse_mode="Markdown")
 
 
-@router.message(Command("history"))
-async def cmd_history(message: Message):
-    items = await st.get_last_entries(message.from_user.id, limit=5)
-    if not items:
-        await message.answer("Пока нет истории. Напишите вопрос 👇", reply_markup=main_reply_kb())
-        return
-
-    lines = ["🧾 **Последние диалоги:**\n"]
-    for created_at, u, b in reversed(items):
-        u_short = (u or "").strip()
-        b_short = (b or "").strip()
-        if len(u_short) > 120:
-            u_short = u_short[:117] + "..."
-        if len(b_short) > 160:
-            b_short = b_short[:157] + "..."
-        lines.append(f"**{created_at}**\n- Вы: {u_short}\n- Бот: {b_short}\n")
-
-    await message.answer("\n".join(lines), parse_mode="Markdown", reply_markup=main_reply_kb())
 
 # Ловим и команду, и кнопку
 @router.message(Command("help"))
@@ -184,21 +166,45 @@ async def btn_buy(message: Message):
     await pay_cmd_buy(message)
 
 
-@router.message(F.text == "👤 Мой тариф")
-async def btn_me(message: Message):
-    await cmd_me(message)
 
 
-@router.message(F.text == "🩺 Медкарта")
+@router.message(F.text == "🐕 Медкарта")
 async def btn_medcard(message: Message):
     from handlers.medcard import show_medcard_menu
 
     await show_medcard_menu(message)
 
 
-@router.message(F.text == "🧾 История")
-async def btn_history(message: Message):
-    await cmd_history(message)
+@router.message(F.text == "🎁 Бонусы / Друзья")
+async def btn_bonuses(message: Message):
+    """Показывает профиль пользователя с балансом и реферальной ссылкой"""
+    user_id = message.from_user.id
+    
+    # Получаем информацию о пользователе
+    user_info = await st.get_user_subscription(user_id)
+    if not user_info:
+        await message.answer("❌ Пользователь не найден.", reply_markup=main_reply_kb())
+        return
+    
+    # Получаем баланс анализов
+    balance = await st.get_user_balance_analyses(user_id)
+    
+    # Получаем реферальную ссылку
+    referral_code = await st.get_referral_link(user_id)
+    bot_username = (await message.bot.get_me()).username
+    referral_link = f"https://t.me/{bot_username}?start={referral_code}"
+    
+    # Формируем сообщение
+    text = (
+        f"👤 **Твой профиль**\n\n"
+        f"🆔 ID: `{user_id}`\n"
+        f"💎 Баланс анализов: **{balance}**\n\n"
+        f"🤝 **Твоя реферальная ссылка:**\n"
+        f"`{referral_link}`\n\n"
+        f"💡 Пригласи друга по этой ссылке — вы оба получите +1 анализ!"
+    )
+    
+    await message.answer(text, parse_mode="Markdown", reply_markup=main_reply_kb())
 
 
 @router.message(F.text == "❓ Что умеет бот")
