@@ -23,6 +23,7 @@ ENV/
 Thumbs.db
 .idea/
 .vscode/
+desktop.ini
 
 # Temp / upload
 .tmp.driveupload/

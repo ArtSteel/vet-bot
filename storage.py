@@ -15,7 +15,7 @@ from sqlalchemy import select, update, insert, func, and_, or_
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from models import Base, User, Pet, History, YooKassaPayment, Feedback
+from models import Base, User, Pet, History, YooKassaPayment, Feedback, PromoCode, PromoUsage
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -99,7 +99,7 @@ async def init_db():
                     SELECT column_name 
                     FROM information_schema.columns 
                     WHERE table_name = 'users' 
-                    AND column_name IN ('balance_analyses', 'is_trial_used', 'last_one_time_purchase')
+                    AND column_name IN ('balance_analyses', 'is_trial_used', 'last_one_time_purchase', 'referrer_id')
                 """
                 result = await conn.execute(text(check_sql))
                 existing_columns = {row[0] for row in result.fetchall()}
@@ -115,6 +115,11 @@ async def init_db():
                 if 'last_one_time_purchase' not in existing_columns:
                     await conn.execute(text("ALTER TABLE users ADD COLUMN last_one_time_purchase VARCHAR"))
                     logger.info("✅ Миграция: добавлена колонка last_one_time_purchase")
+                
+                # Миграция для рефералов
+                if 'referrer_id' not in existing_columns:
+                    await conn.execute(text("ALTER TABLE users ADD COLUMN referrer_id BIGINT"))
+                    logger.info("✅ Миграция: добавлена колонка referrer_id")
             except Exception as e:
                 logger.warning(f"⚠️ Ошибка при миграции колонок (возможно, они уже существуют): {e}")
 
@@ -263,8 +268,11 @@ async def get_bot_stats() -> dict:
 
 # ===== ПОЛЬЗОВАТЕЛИ =====
 
-async def register_user_if_new(user_id: int, username: str):
-    """Регистрирует юзера при нажатии /start"""
+async def register_user_if_new(user_id: int, username: str, referrer_id: Optional[int] = None) -> bool:
+    """
+    Регистрирует юзера при нажатии /start.
+    Возвращает True если пользователь был новым, False если уже существовал.
+    """
     today = datetime.now().strftime("%Y-%m-%d")
     async with _get_session() as session:
         result = await session.execute(select(User).where(User.user_id == user_id))
@@ -278,9 +286,39 @@ async def register_user_if_new(user_id: int, username: str):
                 daily_usage=0,
                 status="free",
                 tier="free",
+                referrer_id=referrer_id,
             )
             session.add(new_user)
             await session.commit()
+            await session.refresh(new_user)
+            
+            # Если есть реферал, начисляем бонусы (в отдельной транзакции)
+            if referrer_id:
+                await _process_referral_bonus(new_user_id, referrer_id)
+            
+            return True
+        return False
+
+
+async def _process_referral_bonus(new_user_id: int, referrer_id: int):
+    """Обрабатывает бонусы за реферала: начисляет +1 анализ пригласившему и новичку"""
+    async with _get_session() as session:
+        try:
+            # Начисляем бонус пригласившему
+            referrer_result = await session.execute(select(User).where(User.user_id == referrer_id))
+            referrer = referrer_result.scalar_one_or_none()
+            if referrer:
+                referrer.balance_analyses = (referrer.balance_analyses or 0) + 1
+                await session.commit()
+            
+            # Начисляем бонус новичку
+            new_user_result = await session.execute(select(User).where(User.user_id == new_user_id))
+            new_user = new_user_result.scalar_one_or_none()
+            if new_user:
+                new_user.balance_analyses = (new_user.balance_analyses or 0) + 1
+                await session.commit()
+        except Exception as e:
+            logger.error(f"Ошибка при начислении реферальных бонусов: {e}")
 
 
 async def check_user_limits(
@@ -495,6 +533,92 @@ async def had_recent_one_time_purchase(user_id: int, hours: int = 24) -> bool:
             return time_diff.total_seconds() < (hours * 3600)
         except Exception:
             return False
+
+
+async def check_text_limits(
+    user_id: int, username: str, free_daily_text_limit: int, consume: bool = True
+) -> dict:
+    """
+    Проверяет лимиты на текстовые сообщения (не OCR).
+    
+    Логика:
+    1. Если активная подписка (sub_end_date > now) -> безлимит
+    2. Если разовая покупка < 24 часов назад -> безлимит (бонус)
+    3. Иначе проверяем FREE_DAILY_TEXT_LIMIT
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    async with _get_session() as session:
+        # Создаём юзера, если его нет
+        result = await session.execute(select(User).where(User.user_id == user_id))
+        user = result.scalar_one_or_none()
+        if not user:
+            user = User(
+                user_id=user_id,
+                username=username,
+                joined_at=datetime.now().isoformat(),
+                last_usage_date=today,
+                daily_usage=0,
+                status="free",
+                tier="free",
+                photos_month=0,
+                last_photo_month=datetime.now().strftime("%Y-%m"),
+            )
+            session.add(user)
+            await session.commit()
+            await session.refresh(user)
+
+        # Сброс дневного счетчика
+        if user.last_usage_date != today:
+            user.daily_usage = 0
+            user.last_usage_date = today
+            await session.commit()
+            await session.refresh(user)
+
+        # Проверка админа
+        if user.status == "admin":
+            return {"allowed": True, "limit": None, "remaining": None, "reason": "admin"}
+
+        # Проверка 1: Активная подписка
+        now = datetime.now()
+        sub_end = _parse_sub_end(user.sub_end_date)
+        is_paid_active = (user.status == "paid") and sub_end and (sub_end > now)
+        if is_paid_active:
+            return {"allowed": True, "limit": None, "remaining": None, "reason": "subscription"}
+
+        # Проверка 2: Разовая покупка за последние 24 часа
+        if user.last_one_time_purchase:
+            try:
+                last_purchase = datetime.fromisoformat(user.last_one_time_purchase)
+                time_diff = datetime.now() - last_purchase
+                if time_diff.total_seconds() < (24 * 3600):  # 24 часа
+                    return {"allowed": True, "limit": None, "remaining": None, "reason": "one_time_purchase"}
+            except Exception:
+                pass
+
+        # Проверка 3: FREE тариф - проверяем лимит
+        if user.daily_usage >= free_daily_text_limit:
+            return {
+                "allowed": False,
+                "limit": free_daily_text_limit,
+                "remaining": 0,
+                "reason": "free_limit_exceeded"
+            }
+
+        if consume:
+            user.daily_usage += 1
+            await session.commit()
+            await session.refresh(user)
+            used = user.daily_usage
+        else:
+            used = user.daily_usage
+
+        remaining = free_daily_text_limit - used
+        return {
+            "allowed": True,
+            "limit": free_daily_text_limit,
+            "remaining": max(0, remaining),
+            "reason": "free"
+        }
 
 
 async def check_photo_limits(
@@ -762,3 +886,149 @@ async def save_feedback(
         else:
             session.add(feedback)
         await session.commit()
+
+
+# ===== ПРОМОКОДЫ И РЕФЕРАЛЫ =====
+
+async def activate_promo_code(user_id: int, code_text: str) -> dict:
+    """
+    Активирует промокод для пользователя.
+    Возвращает dict с результатом: {"success": bool, "message": str, "type": str, "value": int}
+    """
+    code_text = code_text.strip().upper()
+    now = datetime.now()
+    
+    async with _get_session() as session:
+        # Проверяем существование промокода
+        promo_result = await session.execute(select(PromoCode).where(PromoCode.code == code_text))
+        promo = promo_result.scalar_one_or_none()
+        
+        if not promo:
+            return {"success": False, "message": "❌ Промокод не найден."}
+        
+        # Проверка срока действия
+        if promo.expiry_date:
+            try:
+                expiry = datetime.fromisoformat(promo.expiry_date.replace("Z", "+00:00"))
+                if expiry < now:
+                    return {"success": False, "message": "❌ Промокод истек."}
+            except Exception:
+                # Если не удалось распарсить, считаем что срок не истек
+                pass
+        
+        # Проверка лимита использований
+        if promo.max_uses > 0 and promo.current_uses >= promo.max_uses:
+            return {"success": False, "message": "❌ Промокод больше недействителен (лимит использований исчерпан)."}
+        
+        # Проверка: использовал ли этот пользователь этот промокод ранее
+        usage_result = await session.execute(
+            select(PromoUsage).where(
+                and_(PromoUsage.user_id == user_id, PromoUsage.promo_code_id == promo.id)
+            )
+        )
+        existing_usage = usage_result.scalar_one_or_none()
+        if existing_usage:
+            return {"success": False, "message": "❌ Вы уже использовали этот промокод."}
+        
+        # Начисляем бонус
+        user_result = await session.execute(select(User).where(User.user_id == user_id))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            return {"success": False, "message": "❌ Пользователь не найден."}
+        
+        try:
+            if promo.type == "subscription_days":
+                # Продлеваем подписку
+                current_sub_end = _parse_sub_end(user.sub_end_date)
+                if current_sub_end and current_sub_end > now:
+                    # Если подписка активна, продлеваем от текущей даты окончания
+                    new_sub_end = current_sub_end
+                else:
+                    # Если подписки нет, начинаем с сегодня
+                    new_sub_end = now
+                
+                from datetime import timedelta
+                new_sub_end = new_sub_end + timedelta(days=promo.value)
+                user.sub_end_date = new_sub_end.isoformat()
+                user.status = "paid"
+                if not user.tier or user.tier == "free":
+                    user.tier = "plus"  # По умолчанию plus при активации промокода
+                
+            elif promo.type == "balance_add":
+                # Увеличиваем баланс анализов
+                user.balance_analyses = (user.balance_analyses or 0) + promo.value
+            else:
+                return {"success": False, "message": "❌ Неизвестный тип промокода."}
+            
+            # Увеличиваем счетчик использований
+            promo.current_uses += 1
+            
+            # Записываем использование
+            usage = PromoUsage(
+                user_id=user_id,
+                promo_code_id=promo.id,
+                used_at=now.isoformat()
+            )
+            session.add(usage)
+            
+            await session.commit()
+            
+            type_name = "дней подписки" if promo.type == "subscription_days" else "анализов"
+            return {
+                "success": True,
+                "message": f"✅ Промокод активирован! Вам начислено: {promo.value} {type_name}.",
+                "type": promo.type,
+                "value": promo.value
+            }
+            
+        except Exception as e:
+            await session.rollback()
+            logger.error(f"Ошибка при активации промокода: {e}")
+            return {"success": False, "message": "❌ Ошибка при активации промокода. Попробуйте позже."}
+
+
+async def create_promo_code(
+    code: str,
+    promo_type: str,
+    value: int,
+    max_uses: int = 0,
+    expiry_date: Optional[str] = None
+) -> dict:
+    """
+    Создает новый промокод (только для админов).
+    Возвращает dict с результатом: {"success": bool, "message": str}
+    """
+    code = code.strip().upper()
+    now = datetime.now().isoformat()
+    
+    async with _get_session() as session:
+        # Проверяем, не существует ли уже такой код
+        existing_result = await session.execute(select(PromoCode).where(PromoCode.code == code))
+        existing = existing_result.scalar_one_or_none()
+        if existing:
+            return {"success": False, "message": f"❌ Промокод {code} уже существует."}
+        
+        # Создаем промокод
+        promo = PromoCode(
+            code=code,
+            type=promo_type,
+            value=value,
+            max_uses=max_uses,
+            current_uses=0,
+            expiry_date=expiry_date,
+            created_at=now
+        )
+        session.add(promo)
+        await session.commit()
+        
+        return {
+            "success": True,
+            "message": f"✅ Промокод {code} создан! Тип: {promo_type}, Значение: {value}, Макс. использований: {max_uses if max_uses > 0 else '∞'}"
+        }
+
+
+async def get_referral_link(user_id: int) -> str:
+    """Возвращает реферальную ссылку для пользователя"""
+    # Формат: https://t.me/BOT_USERNAME?start=ref_USER_ID
+    # Но мы вернем только параметр для команды /start
+    return f"ref_{user_id}"

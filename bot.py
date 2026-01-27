@@ -19,6 +19,7 @@ from handlers.medcard import router as medcard_router
 from handlers.menu import router as menu_router
 from handlers.pay import router as pay_router, yookassa_polling_loop
 from handlers.feedback import router as feedback_router
+from handlers.promo import router as promo_router
 from ai_client import VseGPTClient, ModelConfig
 
 # Настройка логирования
@@ -38,6 +39,7 @@ client: VseGPTClient | None = None
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "5"))
+FREE_DAILY_TEXT_LIMIT = int(os.getenv("FREE_DAILY_TEXT_LIMIT", "3"))
 PLUS_DAILY_LIMIT = os.getenv("PLUS_DAILY_LIMIT", os.getenv("STANDARD_DAILY_LIMIT", "50"))
 PRO_DAILY_LIMIT = os.getenv("PRO_DAILY_LIMIT", None)  # None = безлимит
 
@@ -254,16 +256,46 @@ async def unified_ai_entry(message: Message, prompt: str, image_bytes: Optional[
 
     tier = "pro" if user_id in ADMIN_IDS else None
     if user_id not in ADMIN_IDS:
-        limit = await st.check_user_limits(
-            user_id,
-            message.from_user.username or "Unknown",
-            _limits_by_tier(),
-            consume=False,
-        )
-        if not limit["allowed"]:
-            await message.answer("⛔ Лимит вопросов на сегодня исчерпан.\nОформите подписку: /buy")
-            return
-        tier = limit.get("tier") or "free"
+        # Для текстовых сообщений используем новую логику check_text_limits
+        if not image_bytes:
+            text_limit = await st.check_text_limits(
+                user_id,
+                message.from_user.username or "Unknown",
+                FREE_DAILY_TEXT_LIMIT,
+                consume=False,
+            )
+            if not text_limit["allowed"]:
+                await message.answer(
+                    "⛔ Лимит текстовых сообщений на сегодня исчерпан.\n\n"
+                    "💎 Доступные варианты:\n"
+                    "• 📄 Разовый разбор анализов — 99₽\n"
+                    "• 🔄 Подписка PLUS/PRO — безлимит\n\n"
+                    "Оформить: /buy"
+                )
+                return
+            
+            # Определяем tier для проверки длины сообщения
+            # Используем get_effective_tier, который проверяет активную подписку
+            effective_tier = await st.get_effective_tier(user_id)
+            if effective_tier != "free":
+                tier = effective_tier  # plus или pro
+            elif text_limit.get("reason") == "one_time_purchase":
+                # Разовая покупка дает доступ к более мощной модели, но tier остается free для лимитов
+                tier = "free"
+            else:
+                tier = "free"
+        else:
+            # Для фото/OCR используем старую логику
+            limit = await st.check_user_limits(
+                user_id,
+                message.from_user.username or "Unknown",
+                _limits_by_tier(),
+                consume=False,
+            )
+            if not limit["allowed"]:
+                await message.answer("⛔ Лимит вопросов на сегодня исчерпан.\nОформите подписку: /buy")
+                return
+            tier = limit.get("tier") or "free"
 
         max_chars = _max_chars_for(tier)
         if prompt and len(prompt) > max_chars:
@@ -273,8 +305,18 @@ async def unified_ai_entry(message: Message, prompt: str, image_bytes: Optional[
                 "Сократите текст или оформите подписку: /buy"
             )
             return
-        # Теперь списываем (после всех валидаций) — только для ТЕКСТА
+        
+        # Списываем лимит (после всех валидаций)
         if not image_bytes:
+            # Для текстовых сообщений используем check_text_limits
+            await st.check_text_limits(
+                user_id,
+                message.from_user.username or "Unknown",
+                FREE_DAILY_TEXT_LIMIT,
+                consume=True,
+            )
+        else:
+            # Для фото/OCR используем старую логику
             await st.check_user_limits(
                 user_id,
                 message.from_user.username or "Unknown",
@@ -354,6 +396,7 @@ async def main():
     dp.include_router(ocr_router)
     dp.include_router(menu_router)
     dp.include_router(feedback_router)
+    dp.include_router(promo_router)
     dp.include_router(ai_router)
     
     await bot.delete_webhook(drop_pending_updates=True)

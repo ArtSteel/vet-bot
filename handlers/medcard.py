@@ -143,7 +143,9 @@ async def process_pet_input(message: Message):
     
     active = await st.get_active_pet(user_id)
     kb = InlineKeyboardBuilder()
+    kb.button(text="Продолжить", callback_data="pet:edit_menu")
     kb.button(text="Ок, в меню", callback_data="main:medcard")
+    kb.adjust(2)
     
     await message.answer(f"✅ Сохранено!\n\n{render_pet_card(active)}", reply_markup=kb.as_markup())
 

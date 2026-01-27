@@ -6,8 +6,8 @@ ORM Models для Vet-bot (SQLAlchemy 2.0 Async)
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, Integer, Float, Text, DateTime, func, UniqueConstraint
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import String, Integer, Float, Text, DateTime, func, UniqueConstraint, BigInteger, ForeignKey
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -33,6 +33,7 @@ class User(Base):
     balance_analyses: Mapped[int] = mapped_column(Integer, default=0)  # Количество доступных разовых расшифровок
     is_trial_used: Mapped[bool] = mapped_column(Integer, default=0)  # 0 = не использован, 1 = использован (SQLite boolean)
     last_one_time_purchase: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # ISO datetime последней разовой покупки
+    referrer_id: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)  # ID пользователя, который пригласил
 
     def to_dict(self) -> dict:
         """Преобразует объект в словарь (для обратной совместимости)"""
@@ -51,6 +52,7 @@ class User(Base):
             "balance_analyses": self.balance_analyses,
             "is_trial_used": bool(self.is_trial_used),
             "last_one_time_purchase": self.last_one_time_purchase,
+            "referrer_id": self.referrer_id,
         }
 
 
@@ -125,3 +127,33 @@ class Feedback(Base):
     kind: Mapped[str] = mapped_column(String, nullable=False)  # 'like', 'dislike'
     source: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # 'text', 'vision'
     created_at: Mapped[str] = mapped_column(String, nullable=False)  # YYYY-MM-DD HH:MM
+
+
+class PromoCode(Base):
+    """Модель промокода"""
+    __tablename__ = "promo_codes"
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_promo_code"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String, nullable=False, unique=True)  # Уникальный код промокода
+    type: Mapped[str] = mapped_column(String, nullable=False)  # 'subscription_days' или 'balance_add'
+    value: Mapped[int] = mapped_column(Integer, nullable=False)  # Значение (дни подписки или единицы баланса)
+    max_uses: Mapped[int] = mapped_column(Integer, default=0)  # 0 = бесконечно
+    current_uses: Mapped[int] = mapped_column(Integer, default=0)  # Текущее количество использований
+    expiry_date: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # ISO datetime или YYYY-MM-DD
+    created_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # ISO datetime
+
+
+class PromoUsage(Base):
+    """Модель использования промокода пользователем"""
+    __tablename__ = "promo_usage"
+    __table_args__ = (
+        UniqueConstraint("user_id", "promo_code_id", name="uq_user_promo"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    promo_code_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    used_at: Mapped[str] = mapped_column(String, nullable=False)  # ISO datetime
