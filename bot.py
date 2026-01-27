@@ -22,6 +22,7 @@ from handlers.pay import router as pay_router, yookassa_polling_loop
 from handlers.feedback import router as feedback_router
 from handlers.promo import router as promo_router
 from handlers.admin import router as admin_router
+from middlewares.logger_middleware import LoggingMiddleware
 from ai_client import VseGPTClient, ModelConfig
 
 # Настройка логирования
@@ -30,6 +31,9 @@ logging.basicConfig(
     format="%(asctime)s - [%(levelname)s] - %(name)s - %(message)s"
 )
 logger = logging.getLogger("VetBot")
+
+# Отключаем шумные логи aiogram
+logging.getLogger("aiogram.event").setLevel(logging.WARNING)
 
 load_dotenv()
 
@@ -405,6 +409,9 @@ async def main():
     client = VseGPTClient(VSEGPT_API_KEY, VSEGPT_BASE_URL)
     bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"), default=DefaultBotProperties(parse_mode="Markdown"))
     dp = Dispatcher()
+    
+    # Подключаем middleware для логирования действий пользователей
+    dp.update.outer_middleware(LoggingMiddleware())
     
     register_answer_callback(unified_ai_entry)
     

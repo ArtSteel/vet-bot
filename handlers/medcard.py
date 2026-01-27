@@ -140,8 +140,6 @@ async def process_pet_input(message: Message):
     user_id = message.from_user.id
     field = WAITING_FIELD.pop(user_id) # Забираем ожидание
     val = message.text.strip()
-    
-    print(f"📝 [MEDCARD] Поймали ввод для поля '{field}': {val}")
 
     if field == "weight":
         try: val = float(val.replace(",", "."))
