@@ -6,7 +6,7 @@ Async Storage для Vet-bot (SQLAlchemy 2.0)
 
 import logging
 import os
-from datetime import datetime, date, time
+from datetime import datetime, date, time, timedelta
 from pathlib import Path
 from typing import Optional
 
@@ -263,6 +263,120 @@ async def get_bot_stats() -> dict:
             )
         ).scalar() or 0
 
+    return stats
+
+
+async def get_revenue_stats() -> dict:
+    """
+    Финансовая статистика: выручка из платежей YooKassa.
+    Использует фиксированные цены для расчета.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    stats = {
+        "total_revenue": 0,
+        "today_revenue": 0,
+        "average_check": 0,
+        "total_transactions": 0,
+        "today_transactions": 0
+    }
+    
+    # Цены по тарифам
+    PRICES = {
+        "one_time_analysis": 99,
+        "plus": 299,
+        "pro": 590
+    }
+    
+    async with _get_session() as session:
+        # Получаем все платежи
+        result = await session.execute(select(YooKassaPayment))
+        payments = result.fetchall()
+        
+        total_revenue = 0
+        today_revenue = 0
+        total_count = 0
+        today_count = 0
+        
+        for payment in payments:
+            tier = payment.tier
+            price = PRICES.get(tier, 0)
+            
+            if price > 0:
+                total_revenue += price
+                total_count += 1
+                
+                # Проверяем, был ли платеж сегодня
+                if payment.created_at and payment.created_at.startswith(today):
+                    today_revenue += price
+                    today_count += 1
+        
+        stats["total_revenue"] = total_revenue
+        stats["today_revenue"] = today_revenue
+        stats["total_transactions"] = total_count
+        stats["today_transactions"] = today_count
+        stats["average_check"] = round(total_revenue / total_count, 2) if total_count > 0 else 0
+    
+    return stats
+
+
+async def get_detailed_user_stats() -> dict:
+    """Детальная статистика по пользователям"""
+    today = datetime.now().strftime("%Y-%m-%d")
+    now = datetime.now()
+    week_ago = now - timedelta(days=7)
+    month_ago = now - timedelta(days=30)
+    day_ago = now - timedelta(hours=24)
+    
+    stats = {
+        "users_total": 0,
+        "users_today": 0,
+        "users_week": 0,
+        "users_month": 0,
+        "active_24h": 0
+    }
+    
+    async with _get_session() as session:
+        # Общее количество пользователей
+        stats["users_total"] = (await session.execute(select(func.count(User.user_id)))).scalar() or 0
+        
+        # Новые пользователи
+        stats["users_today"] = (
+            await session.execute(
+                select(func.count(User.user_id)).where(User.joined_at.like(f"{today}%"))
+            )
+        ).scalar() or 0
+        
+        # За неделю (используем строковое сравнение для совместимости)
+        week_str = week_ago.strftime("%Y-%m-%d")
+        # Для SQLite и PostgreSQL используем строковое сравнение
+        stats["users_week"] = (
+            await session.execute(
+                select(func.count(User.user_id)).where(
+                    User.joined_at >= week_str
+                )
+            )
+        ).scalar() or 0
+        
+        # За месяц
+        month_str = month_ago.strftime("%Y-%m-%d")
+        stats["users_month"] = (
+            await session.execute(
+                select(func.count(User.user_id)).where(
+                    User.joined_at >= month_str
+                )
+            )
+        ).scalar() or 0
+        
+        # Активные за последние 24 часа (те, кто отправлял сообщения)
+        day_str = day_ago.strftime("%Y-%m-%d")
+        stats["active_24h"] = (
+            await session.execute(
+                select(func.count(func.distinct(History.user_id))).where(
+                    History.created_at >= day_str
+                )
+            )
+        ).scalar() or 0
+    
     return stats
 
 

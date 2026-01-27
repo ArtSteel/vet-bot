@@ -6,6 +6,7 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command
 import storage as st
+from keyboards.main_kb import main_reply_kb
 
 router = Router()
 # Словарь для ожидания ввода: user_id -> поле (например 'name')
@@ -21,6 +22,15 @@ async def cmd_medcard(message: Message):
 async def cb_medcard(cq: CallbackQuery):
     await show_medcard_menu(cq.message)
     await cq.answer()
+
+@router.callback_query(lambda c: c.data == "medcard:back")
+async def cb_medcard_back(cq: CallbackQuery):
+    """Возврат в главное меню из медкарты"""
+    await cq.answer("Возврат в главное меню")
+    await cq.message.answer(
+        "🏠 Вы вернулись в главное меню.",
+        reply_markup=main_reply_kb()
+    )
 
 async def show_medcard_menu(message: Message):
     user_id = message.chat.id
@@ -144,7 +154,7 @@ async def process_pet_input(message: Message):
     active = await st.get_active_pet(user_id)
     kb = InlineKeyboardBuilder()
     kb.button(text="Продолжить", callback_data="pet:edit_menu")
-    kb.button(text="Ок, в меню", callback_data="main:medcard")
+    kb.button(text="Ок, в меню", callback_data="medcard:back")
     kb.adjust(2)
     
     await message.answer(f"✅ Сохранено!\n\n{render_pet_card(active)}", reply_markup=kb.as_markup())
