@@ -26,13 +26,14 @@ PRO_PHOTOS_PER_MONTH_RAW = os.getenv("PRO_PHOTOS_PER_MONTH", "20")
 PRO_PHOTOS_PER_MONTH = None if not PRO_PHOTOS_PER_MONTH_RAW.strip() else int(PRO_PHOTOS_PER_MONTH_RAW)
 
 WELCOME_TEXT = (
-    "👋 **Привет! Я — ВетСоветник AI.**\n"
+    "👋 <b>Привет! Я — ВетСоветник AI.</b>\n"
     "Твой карманный помощник по здоровью питомцев.\n\n"
-    "🐾 **ЧЕМ Я МОГУ ПОМОЧЬ?**\n"
-    "• 🚑 **Симптомы:** Оценю срочность и дам первую помощь.\n"
-    "• 💊 **Лекарства:** Рассчитаю дозировку на вес.\n"
-    "• 🔬 **Анализы:** Расшифрую фото бланков (в тарифе PRO).\n\n"
-    "👇 **Начните с создания анкеты питомца:**"
+    "🐾 <b>ЧЕМ Я МОГУ ПОМОЧЬ?</b>\n"
+    "• 🚑 <b>Симптомы:</b> Оценю срочность и дам первую помощь.\n"
+    "• 💊 <b>Лекарства:</b> Рассчитаю дозировку на вес.\n"
+    "• 🔬 <b>Анализы:</b> Расшифрую фото бланков (в тарифе PRO).\n\n"
+    "👇 <b>Начните с создания анкеты питомца:</b>\n\n"
+    "Продолжая использование бота, вы принимаете условия <a href=\"https://telegra.ph/Polzovatelskoe-soglashenie-servisa-VetSovetnik-AI-02-24 \">Публичной оферты</a> и согласие на <a href=\"https://telegra.ph/Politika-konfidencialnosti-02-24-86 \">обработку персональных данных</a>."
 )
 
 HELP_TEXT = (
@@ -108,7 +109,7 @@ async def cmd_start(message: Message, command: CommandObject):
         result = await st.activate_promo_code(user.id, promo_code)
         await message.answer(result["message"], parse_mode="Markdown")
     
-    await message.answer(WELCOME_TEXT, reply_markup=main_reply_kb(), parse_mode="Markdown")
+    await message.answer(WELCOME_TEXT, reply_markup=main_reply_kb(), parse_mode="HTML")
 
 
 @router.message(Command("me"))
