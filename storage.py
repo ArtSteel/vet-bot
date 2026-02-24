@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import selectinload
 
 from models import Base, User, Pet, History, YooKassaPayment, Feedback, PromoCode, PromoUsage
+import config
 
 # Загружаем переменные окружения
 load_dotenv()
@@ -30,29 +31,27 @@ def _get_database_url() -> str:
     - Если указаны параметры PostgreSQL -> формируем URL для PostgreSQL
     - Иначе -> используем SQLite (fallback)
     """
-    # Проверяем полный DATABASE_URL
-    database_url = os.getenv("DATABASE_URL")
-    if database_url:
-        # Если URL не содержит схему драйвера, добавляем postgresql+asyncpg
-        if database_url.startswith("postgresql://"):
-            database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        elif not database_url.startswith(("postgresql+asyncpg://", "sqlite+aiosqlite://")):
-            # Если указан просто postgresql://, добавляем asyncpg
-            database_url = f"postgresql+asyncpg://{database_url}"
-        logger.info("🔗 Используется DATABASE_URL из .env")
-        return database_url
-
-    # Проверяем параметры PostgreSQL
-    pg_user = os.getenv("POSTGRES_USER")
-    pg_password = os.getenv("POSTGRES_PASSWORD")
-    pg_db = os.getenv("POSTGRES_DB")
-    pg_host = os.getenv("POSTGRES_HOST", "localhost")
-    pg_port = os.getenv("POSTGRES_PORT", "5432")
+    # Приоритет 1: параметры PostgreSQL
+    pg_user = config.POSTGRES_USER
+    pg_password = config.POSTGRES_PASSWORD
+    pg_db = config.POSTGRES_DB
+    pg_host = config.POSTGRES_HOST
+    pg_port = config.POSTGRES_PORT
 
     if pg_user and pg_password and pg_db:
         pg_url = f"postgresql+asyncpg://{pg_user}:{pg_password}@{pg_host}:{pg_port}/{pg_db}"
         logger.info(f"🐘 Используется PostgreSQL: {pg_host}:{pg_port}/{pg_db}")
         return pg_url
+
+    # Приоритет 2: полный DATABASE_URL
+    database_url = config.DATABASE_URL
+    if database_url:
+        if database_url.startswith("postgresql://"):
+            database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif not database_url.startswith(("postgresql+asyncpg://", "sqlite+aiosqlite://")):
+            database_url = f"postgresql+asyncpg://{database_url}"
+        logger.info("🔗 Используется DATABASE_URL из .env")
+        return database_url
 
     # Fallback на SQLite
     db_path = Path("bot.db")

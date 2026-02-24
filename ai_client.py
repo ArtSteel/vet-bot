@@ -18,7 +18,7 @@ class ModelConfig:
 
 class VseGPTClient:
     """
-    OpenAI-compatible Chat Completions client for vsegpt.ru.
+    OpenAI-compatible Chat Completions client.
     """
 
     def __init__(self, api_key: str, base_url: str = "https://api.vsegpt.ru/v1"):
@@ -38,7 +38,7 @@ class VseGPTClient:
         image_bytes: Optional[bytes] = None,
     ) -> str:
         if not self.enabled:
-            return "❌ VseGPT API key не настроен. Добавьте VSEGPT_API_KEY в .env"
+            return "❌ AI API key не настроен. Добавьте AI_API_KEY или VSEGPT_API_KEY в .env"
 
         url = f"{self.base_url}/chat/completions"
         headers = {
@@ -78,15 +78,15 @@ class VseGPTClient:
                 async with sess.post(url, headers=headers, json=payload) as r:
                     raw = await r.text()
                     if r.status != 200:
-                        logger.error("VseGPT error %s: %s", r.status, raw[:2000])
+                        logger.error("AI provider error %s: %s", r.status, raw[:2000])
                         return f"❌ Ошибка модели: {r.status}\n{raw[:1500]}"
                     try:
                         data = json.loads(raw)
                     except Exception:
                         return raw
         except Exception as e:
-            logger.exception("VseGPT request failed: %s", e)
-            return "❌ Ошибка подключения к VseGPT. Проверьте интернет/ключ/доступ."
+            logger.exception("AI provider request failed: %s", e)
+            return "❌ Ошибка подключения к AI-провайдеру. Проверьте интернет/ключ/доступ."
 
         try:
             return (data["choices"][0]["message"]["content"] or "").strip()

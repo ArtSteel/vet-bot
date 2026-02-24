@@ -10,10 +10,12 @@ from typing import List, Optional
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message, BotCommand, BotCommandScopeDefault
 from aiogram.client.default import DefaultBotProperties
+from aiogram.fsm.storage.redis import RedisStorage
 from dotenv import load_dotenv
 
 # Подключаем модули проекта
 import storage as st
+import config
 from handlers.ocr import router as ocr_router, register_answer_callback
 from handlers.core import router as core_router
 from handlers.medcard import router as medcard_router
@@ -24,6 +26,7 @@ from handlers.promo import router as promo_router
 from handlers.admin import router as admin_router
 from middlewares.logger_middleware import LoggingMiddleware
 from ai_client import VseGPTClient, ModelConfig
+from check_env import validate_required_env
 
 # Настройка логирования
 logging.basicConfig(
@@ -42,7 +45,7 @@ ai_router = Router()
 client: VseGPTClient | None = None
 
 # --- КОНФИГУРАЦИЯ ---
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_BOT_TOKEN = config.TELEGRAM_BOT_TOKEN
 
 FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", "5"))
 FREE_DAILY_TEXT_LIMIT = int(os.getenv("FREE_DAILY_TEXT_LIMIT", "3"))
@@ -80,8 +83,8 @@ MAX_CHARS_FREE = int(os.getenv("MAX_CHARS_FREE", "2000"))
 MAX_CHARS_STANDARD = int(os.getenv("MAX_CHARS_STANDARD", "6000"))
 MAX_CHARS_PRO = int(os.getenv("MAX_CHARS_PRO", "12000"))
 
-VSEGPT_API_KEY = os.getenv("VSEGPT_API_KEY", "")
-VSEGPT_BASE_URL = os.getenv("VSEGPT_BASE_URL", "https://api.vsegpt.ru/v1")
+VSEGPT_API_KEY = config.AI_API_KEY
+VSEGPT_BASE_URL = config.AI_BASE_URL
 
 raw_admins = os.getenv("ADMIN_IDS", "")
 ADMIN_IDS = []
@@ -404,11 +407,13 @@ async def reminder_loop(bot: Bot):
 async def main():
     global client
     load_dotenv()
+    validate_required_env()
     await st.init_db()  # Async инициализация БД
 
     client = VseGPTClient(VSEGPT_API_KEY, VSEGPT_BASE_URL)
-    bot = Bot(token=os.getenv("TELEGRAM_BOT_TOKEN"), default=DefaultBotProperties(parse_mode="Markdown"))
-    dp = Dispatcher()
+    bot = Bot(token=TELEGRAM_BOT_TOKEN, default=DefaultBotProperties(parse_mode="Markdown"))
+    storage = RedisStorage.from_url(config.REDIS_URL)
+    dp = Dispatcher(storage=storage)
     
     # Подключаем middleware для логирования действий пользователей
     dp.update.outer_middleware(LoggingMiddleware())

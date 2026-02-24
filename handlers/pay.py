@@ -19,7 +19,7 @@ logger = logging.getLogger("VetBot.Pay")
 
 load_dotenv()
 YOOKASSA_SHOP_ID = os.getenv("YOOKASSA_SHOP_ID")
-YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY")
+YOOKASSA_SECRET_KEY = os.getenv("YOOKASSA_SECRET_KEY") or os.getenv("YOOKASSA_TOKEN")
 YOOKASSA_RETURN_URL = os.getenv("YOOKASSA_RETURN_URL", "https://t.me")
 
 if YOOKASSA_SHOP_ID and YOOKASSA_SECRET_KEY:
