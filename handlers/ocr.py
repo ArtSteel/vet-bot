@@ -13,6 +13,7 @@ import storage as st # Подключаем базу для проверки т�
 import os
 
 router = Router()
+logger = logging.getLogger("VetBot.OCR")
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
 FREE_PHOTOS_PER_MONTH = int(os.getenv("FREE_PHOTOS_PER_MONTH", "1"))
 PLUS_PHOTOS_PER_MONTH = int(os.getenv("PLUS_PHOTOS_PER_MONTH", "10"))
@@ -39,7 +40,7 @@ def _process_pdf_sync(buf: io.BytesIO) -> Optional[Image.Image]:
         doc.close()
         return Image.open(io.BytesIO(img_data))
     except Exception as e:
-        logging.error(f"Error processing PDF: {e}")
+        logger.error(f"Error in _process_pdf_sync: {e}")
         return None
 
 
@@ -57,7 +58,7 @@ def _process_image_sync(img: Image.Image) -> Optional[bytes]:
         img.save(out_buf, format='JPEG', quality=85, optimize=True)
         return out_buf.getvalue()
     except Exception as e:
-        logging.error(f"Error processing image: {e}")
+        logger.error(f"Error in _process_image_sync: {e}")
         return None
 
 
@@ -83,7 +84,7 @@ async def _prepare_file(message: Message, file_id: str, is_pdf: bool = False) ->
         return result
 
     except Exception as e:
-        logging.error(f"Error processing file: {e}")
+        logger.error(f"Error in _prepare_file: {e}")
         return None
 
 # --- Хендлеры ---
@@ -164,8 +165,8 @@ async def on_photo(message: Message):
             # Удаляем статус-сообщение после обработки
             try:
                 await status_msg.delete()
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Error in on_photo status cleanup: {e}")
 
 @router.message(F.document)
 async def on_document(message: Message):
@@ -250,7 +251,7 @@ async def on_document(message: Message):
             # Удаляем статус-сообщение после обработки
             try:
                 await status_msg.delete()
-            except:
-                pass
+            except Exception as e:
+                logger.error(f"Error in on_document status cleanup: {e}")
     else:
         await status_msg.edit_text("❌ Не удалось прочитать файл. Попробуйте прислать фото или скриншот.")

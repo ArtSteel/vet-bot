@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-from sqlalchemy import select, update, insert, func, and_, or_
+from sqlalchemy import select, update, insert, func, and_, or_, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -91,7 +91,6 @@ async def init_db():
         
         # Миграция: добавление новых колонок для монетизации (если их нет)
         if "postgresql" in DATABASE_URL:
-            from sqlalchemy import text
             try:
                 # Проверяем существующие колонки
                 check_sql = """
@@ -119,8 +118,39 @@ async def init_db():
                 if 'referrer_id' not in existing_columns:
                     await conn.execute(text("ALTER TABLE users ADD COLUMN referrer_id BIGINT"))
                     logger.info("✅ Миграция: добавлена колонка referrer_id")
+
+                # Миграция платежей: сумма и статус для честной финансовой статистики
+                payments_check_sql = """
+                    SELECT column_name
+                    FROM information_schema.columns
+                    WHERE table_name = 'yookassa_payments'
+                    AND column_name IN ('amount', 'status')
+                """
+                payments_result = await conn.execute(text(payments_check_sql))
+                payment_columns = {row[0] for row in payments_result.fetchall()}
+
+                if "amount" not in payment_columns:
+                    await conn.execute(text("ALTER TABLE yookassa_payments ADD COLUMN amount DOUBLE PRECISION"))
+                    logger.info("✅ Миграция: добавлена колонка amount в yookassa_payments")
+
+                if "status" not in payment_columns:
+                    await conn.execute(text("ALTER TABLE yookassa_payments ADD COLUMN status VARCHAR DEFAULT 'succeeded'"))
+                    logger.info("✅ Миграция: добавлена колонка status в yookassa_payments")
             except Exception as e:
                 logger.warning(f"⚠️ Ошибка при миграции колонок (возможно, они уже существуют): {e}")
+        else:
+            # SQLite миграции для старых локальных БД
+            try:
+                payments_info = await conn.execute(text("PRAGMA table_info(yookassa_payments)"))
+                payment_columns = {row[1] for row in payments_info.fetchall()}
+                if "amount" not in payment_columns:
+                    await conn.execute(text("ALTER TABLE yookassa_payments ADD COLUMN amount FLOAT"))
+                    logger.info("✅ Миграция SQLite: добавлена колонка amount в yookassa_payments")
+                if "status" not in payment_columns:
+                    await conn.execute(text("ALTER TABLE yookassa_payments ADD COLUMN status VARCHAR DEFAULT 'succeeded'"))
+                    logger.info("✅ Миграция SQLite: добавлена колонка status в yookassa_payments")
+            except Exception as e:
+                logger.warning(f"⚠️ Ошибка SQLite-миграции yookassa_payments: {e}")
 
     db_type = "PostgreSQL" if "postgresql" in DATABASE_URL else "SQLite"
     logger.info(f"📂 БД готова ({db_type} + Async SQLAlchemy 2.0)")
@@ -268,7 +298,7 @@ async def get_bot_stats() -> dict:
 async def get_revenue_stats() -> dict:
     """
     Финансовая статистика: выручка из платежей YooKassa.
-    Использует фиксированные цены для расчета.
+    Использует реальные суммы из поля amount только по успешным платежам.
     """
     today = datetime.now().strftime("%Y-%m-%d")
     stats = {
@@ -279,16 +309,11 @@ async def get_revenue_stats() -> dict:
         "today_transactions": 0
     }
     
-    # Цены по тарифам
-    PRICES = {
-        "one_time_analysis": 99,
-        "plus": 299,
-        "pro": 590
-    }
-    
     async with _get_session() as session:
-        # Получаем все платежи как объекты модели
-        result = await session.execute(select(YooKassaPayment))
+        # Только успешные платежи участвуют в финансовой статистике
+        result = await session.execute(
+            select(YooKassaPayment).where(YooKassaPayment.status == "succeeded")
+        )
         payments = result.scalars().all()
         
         total_revenue = 0
@@ -297,17 +322,17 @@ async def get_revenue_stats() -> dict:
         today_count = 0
         
         for payment in payments:
-            tier = payment.tier
-            price = PRICES.get(tier, 0)
-            
-            if price > 0:
-                total_revenue += price
-                total_count += 1
-                
-                # Проверяем, был ли платеж сегодня
-                if payment.created_at and payment.created_at.startswith(today):
-                    today_revenue += price
-                    today_count += 1
+            amount = float(payment.amount or 0)
+            if amount <= 0:
+                continue
+
+            total_revenue += amount
+            total_count += 1
+
+            # Проверяем, был ли платеж сегодня
+            if payment.created_at and payment.created_at.startswith(today):
+                today_revenue += amount
+                today_count += 1
         
         stats["total_revenue"] = total_revenue
         stats["today_revenue"] = today_revenue
@@ -407,7 +432,7 @@ async def register_user_if_new(user_id: int, username: str, referrer_id: Optiona
             
             # Если есть реферал, начисляем бонусы (в отдельной транзакции)
             if referrer_id:
-                await _process_referral_bonus(new_user_id, referrer_id)
+                await _process_referral_bonus(new_user.user_id, referrer_id)
             
             return True
         return False
@@ -944,7 +969,12 @@ async def check_reminders_today() -> list[tuple[int, str]]:
 # ===== ПЛАТЕЖИ И ФИДБЕК =====
 
 async def mark_yookassa_payment_processed(
-    payment_id: str, user_id: int, tier: str, created_at: str
+    payment_id: str,
+    user_id: int,
+    tier: str,
+    created_at: str,
+    amount: Optional[float] = None,
+    status: str = "succeeded",
 ) -> bool:
     """
     Сохраняет payment_id, чтобы не активировать подписку повторно.
@@ -960,7 +990,12 @@ async def mark_yookassa_payment_processed(
 
         # Вставляем новый
         payment = YooKassaPayment(
-            payment_id=payment_id, user_id=user_id, tier=tier, created_at=created_at
+            payment_id=payment_id,
+            user_id=user_id,
+            tier=tier,
+            created_at=created_at,
+            amount=amount,
+            status=status,
         )
         session.add(payment)
         try:

@@ -111,6 +111,8 @@ class YooKassaPayment(Base):
     payment_id: Mapped[str] = mapped_column(String, primary_key=True)
     user_id: Mapped[int] = mapped_column(Integer, nullable=False)
     tier: Mapped[str] = mapped_column(String, nullable=False)  # 'plus', 'pro'
+    amount: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="succeeded")
     created_at: Mapped[Optional[str]] = mapped_column(String, nullable=True)
 
 

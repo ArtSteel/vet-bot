@@ -226,7 +226,8 @@ async def send_long_message(message: Message, text: str) -> Message | None:
         chunk = text[i:i + chunk_size]
         try:
             last_msg = await message.answer(chunk, parse_mode="Markdown")
-        except:
+        except Exception as e:
+            logger.error(f"Error in send_long_message: {e}")
             last_msg = await message.answer(chunk, parse_mode=None)
     return last_msg
 
@@ -397,10 +398,13 @@ async def reminder_loop(bot: Bot):
         try:
             notifications = await st.check_reminders_today()
             for uid, text in notifications:
-                try: await bot.send_message(uid, text)
-                except: pass
+                try:
+                    await bot.send_message(uid, text)
+                except Exception as e:
+                    logger.error(f"Error in reminder_loop send_message: {e}")
             await asyncio.sleep(60 * 60 * 24) 
-        except:
+        except Exception as e:
+            logger.error(f"Error in reminder_loop: {e}")
             await asyncio.sleep(60)
 
 # === ЗАПУСК ===
@@ -438,5 +442,7 @@ async def main():
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    try: asyncio.run(main())
-    except KeyboardInterrupt: pass
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by KeyboardInterrupt")

@@ -1,9 +1,11 @@
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
+import logging
 
 import storage as st
 
 router = Router()
+logger = logging.getLogger("VetBot.Feedback")
 
 
 @router.callback_query(F.data.startswith("fb:"))
@@ -25,8 +27,8 @@ async def cb_feedback(cq: CallbackQuery):
     # Убираем клавиатуру, чтобы не кликали бесконечно
     try:
         await cq.message.edit_reply_markup(reply_markup=None)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.error(f"Error in cb_feedback: {e}")
 
     if kind == "like":
         await cq.answer("Спасибо! 👍", show_alert=False)

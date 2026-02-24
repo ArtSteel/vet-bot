@@ -2,6 +2,7 @@
 
 import os
 import asyncio
+import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.filters import CommandStart, Command, CommandObject
@@ -10,6 +11,7 @@ import storage as st
 from keyboards.main_kb import main_reply_kb
 
 router = Router()
+logger = logging.getLogger("VetBot.Core")
 
 load_dotenv()
 ADMIN_IDS = [int(x) for x in os.getenv("ADMIN_IDS", "").split(",") if x.strip().isdigit()]
@@ -99,8 +101,7 @@ async def cmd_start(message: Message, command: CommandObject):
                 parse_mode="Markdown"
             )
         except Exception as e:
-            # Если не удалось отправить уведомление (пользователь заблокировал бота и т.д.), игнорируем
-            pass
+            logger.error(f"Error in cmd_start referral notification: {e}")
     
     # Если указан промокод, пытаемся его активировать
     if promo_code:
@@ -270,6 +271,8 @@ async def cmd_broadcast(message: Message, command: CommandObject):
     if not command.args: return
     users = await st.get_all_users()
     for uid in users:
-        try: await message.bot.send_message(uid, command.args, parse_mode="Markdown")
-        except: pass
+        try:
+            await message.bot.send_message(uid, command.args, parse_mode="Markdown")
+        except Exception as e:
+            logger.error(f"Error in cmd_broadcast: {e}")
     await message.answer("Рассылка завершена.")

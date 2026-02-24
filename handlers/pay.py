@@ -164,11 +164,26 @@ async def yookassa_polling_loop(bot: Bot, poll_interval: int = 60):
                 tier = metadata.get("tier") or metadata.get("plan")
                 payment_id = getattr(payment, "id", None)
                 created_at = getattr(payment, "created_at", "")
+                payment_status = getattr(payment, "status", "succeeded")
+                payment_amount_obj = getattr(payment, "amount", None)
+                payment_amount = None
+                if payment_amount_obj is not None:
+                    try:
+                        payment_amount = float(getattr(payment_amount_obj, "value", 0) or 0)
+                    except Exception:
+                        payment_amount = None
 
                 if not user_id or not tier or not payment_id:
                     continue
 
-                is_new = await st.mark_yookassa_payment_processed(str(payment_id), int(user_id), str(tier), str(created_at))
+                is_new = await st.mark_yookassa_payment_processed(
+                    str(payment_id),
+                    int(user_id),
+                    str(tier),
+                    str(created_at),
+                    amount=payment_amount,
+                    status=str(payment_status),
+                )
                 if not is_new:
                     continue
 
