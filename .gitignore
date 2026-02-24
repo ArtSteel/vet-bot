@@ -28,4 +28,8 @@ desktop.ini
 # Temp / upload
 .tmp.driveupload/
 
+# Local docs (not part of OSS repo)
+DEPLOY_INSTRUCTIONS.md
+MIGRATION_NOTES.md
+
 

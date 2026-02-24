@@ -1,113 +1,85 @@
-# Миграция с SQLite на PostgreSQL
+# Migration: SQLite → PostgreSQL
 
-## Быстрый старт
+This project can run with PostgreSQL (recommended for production) and can migrate existing data from `bot.db` (SQLite) into PostgreSQL.
 
-### 1. Запусти PostgreSQL через Docker
+## Important notes
+
+- Storage selects database in this order:
+  1) `POSTGRES_*` variables (highest priority)  
+  2) `DATABASE_URL`  
+  3) SQLite fallback (`bot.db`)
+- Migration script: `migrate_db.py`
+- Always create a backup of `bot.db` before migration.
+
+---
+
+## Option A (recommended): PostgreSQL via Docker Compose
+
+### 1) Start PostgreSQL only
+
+Because `docker-compose.yml` also starts `app` and `redis`, for migration you typically need only Postgres:
 
 ```bash
-docker-compose up -d
+docker-compose up -d db
 ```
 
-Проверь, что контейнер запущен:
+Check that it is running:
+
 ```bash
 docker ps | grep vet-bot-postgres
 ```
 
-### 2. Настрой `.env` файл
+### 2) Configure `.env`
 
-Скопируй `.env.example` в `.env` и заполни параметры PostgreSQL:
+Copy `.env.example` → `.env` and set PostgreSQL variables.
 
-```bash
-cp .env.example .env
-```
-
-Или добавь в существующий `.env`:
+If PostgreSQL runs via docker-compose inside the same network, use:
 
 ```env
-POSTGRES_USER=vetbot
-POSTGRES_PASSWORD=vetbot_password
-POSTGRES_DB=vetbot_db
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
+```
+
+If PostgreSQL runs on your host machine (outside Docker), use:
+
+```env
 POSTGRES_HOST=localhost
 POSTGRES_PORT=5432
 ```
 
-### 3. Выполни миграцию данных
+### 3) Run migration
+
+Run migration from your local Python environment:
 
 ```bash
 python migrate_db.py
 ```
 
-Скрипт:
-- ✅ Подключится к существующей SQLite БД (`bot.db`)
-- ✅ Создаст таблицы в PostgreSQL
-- ✅ Перенесет все данные (Users, Pets, History, Payments, Feedback)
-- ✅ Обновит sequences для автоинкрементных полей
+What it does:
+- reads local SQLite `bot.db`
+- creates tables in PostgreSQL (if missing)
+- migrates data (users, pets, history, payments, feedback, etc.)
 
-### 4. Перезапусти бота
+### 4) Start the full stack
 
 ```bash
-python bot.py
+docker-compose up -d --build
 ```
 
-Бот автоматически определит PostgreSQL по переменным в `.env` и переключится на него.
+---
 
-В логах должно появиться:
-```
-🐘 Используется PostgreSQL: localhost:5432/vetbot_db
-📂 БД готова (PostgreSQL + Async SQLAlchemy 2.0)
-```
-
-## Проверка миграции
-
-### Проверь данные в PostgreSQL:
+## Verification
 
 ```bash
 docker exec -it vet-bot-postgres psql -U vetbot -d vetbot_db -c "SELECT COUNT(*) FROM users;"
 docker exec -it vet-bot-postgres psql -U vetbot -d vetbot_db -c "SELECT COUNT(*) FROM pets;"
 ```
 
-### Или через Python:
+---
 
-```python
-import asyncio
-from sqlalchemy import select, func
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from models import User, Pet
+## Rollback to SQLite
 
-async def check():
-    engine = create_async_engine("postgresql+asyncpg://vetbot:vetbot_password@localhost:5432/vetbot_db")
-    session_factory = async_sessionmaker(engine, class_=AsyncSession)
-    
-    async with session_factory() as session:
-        users_count = await session.execute(select(func.count(User.user_id)))
-        pets_count = await session.execute(select(func.count(Pet.id)))
-        print(f"Users: {users_count.scalar()}, Pets: {pets_count.scalar()}")
+To run on SQLite again:
+- unset (or comment out) all `POSTGRES_*` variables in `.env`
+- restart the app; it will fallback to `bot.db`
 
-asyncio.run(check())
-```
-
-## Откат на SQLite
-
-Если нужно вернуться на SQLite:
-
-1. Удали или закомментируй переменные PostgreSQL в `.env`:
-   ```env
-   # POSTGRES_USER=vetbot
-   # POSTGRES_PASSWORD=vetbot_password
-   # ...
-   ```
-
-2. Перезапусти бота - он автоматически переключится на SQLite
-
-## Важные замечания
-
-- ⚠️ **Резервная копия**: Перед миграцией сделай копию `bot.db`:
-  ```bash
-  cp bot.db bot.db.backup
-  ```
-
-- ✅ **Данные сохраняются**: Старый `bot.db` остается нетронутым, можно использовать как резервную копию
-
-- 🔄 **Обратная совместимость**: Бот автоматически определяет, какую БД использовать по переменным окружения
-
-- 🐘 **PostgreSQL в продакшене**: Для VPS можно использовать внешний PostgreSQL или запустить через docker-compose
